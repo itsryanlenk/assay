@@ -5,14 +5,14 @@ machine-readable signals that AI crawlers and assistants rely on when they
 answer a question about a local business, scores them, and turns the result
 into a document the owner can act on.
 
-Two things worth knowing before the rest of this file. **It does not observe AI
-search.** Nothing here watches what an assistant actually says about a
-business; it measures what that business publishes for one to read. And **the
-scoring instrument is calibrated against two delivered client scans, which
-between them publish three scored properties, and nothing else.** That is a
-small calibration set. `scripts/test-instrument.js` fails the build if the
-instrument stops reproducing those three scores. The Limitations section near
-the bottom is the long version of both.
+**It does not observe AI search.** Nothing here watches what an assistant says
+about a business. It measures what that business publishes for one to read.
+
+**The scoring instrument is calibrated against two delivered client scans,
+which between them publish three scored properties, and nothing else.** That is
+a small set. `scripts/test-instrument.js` fails the build if the instrument
+stops reproducing those three scores. Limitations, near the bottom, covers both
+at length.
 
 It is built for one person doing outreach by hand, and it automates the process
 that person already runs:
@@ -27,56 +27,50 @@ that person already runs:
 3. **Reconcile the findings yourself.** You open the page in your own browser,
    copy the view-source, paste it back, and the check is recomputed from your
    paste. A finding you do not reconcile stays unconfirmed and cannot reach a
-   document. Two exceptions worth knowing up front. The AI-readiness score
-   reconciles by severity band rather than by exact number, and the widest band
-   is twenty-five points, so a thinner re-score landing in the same band
-   confirms the figure the app fetched. And where a finding compares the site against the
-   Google listing, only the site half is reconciled; the listing half is the
-   app's own capture on both passes.
+   document. Two exceptions. The AI-readiness score reconciles by severity band
+   rather than by exact number, and the widest band is twenty-five points, so a
+   thinner re-score landing in the same band confirms the figure the app
+   fetched. And where a finding compares the site against the Google listing,
+   only the site half is reconciled; the listing half is the app's own capture
+   on both passes.
 4. **Generate the packet.** A PDF scorecard, a schema starter kit, and delivery
    drafts.
 5. **Approve each artifact on its own.** Nothing auto-sends. There is no sender
    implementation in this codebase: `src/main/send/provider.ts` defines the
    outbound signature and nothing implements it. Once a prospect is dealt with,
-   **ARCHIVE** files its decided artifacts out of the queue. That is a view
-   setting and nothing else: the ledger is untouched, RESTORE brings them back,
-   an artifact still waiting on you is never filed away, and new work for that
-   prospect un-files it.
+   **ARCHIVE** files its decided artifacts out of the queue. The ledger is
+   untouched, RESTORE brings them back, anything still waiting on you is never
+   filed away, and new work for that prospect un-files it.
 
-Step three is the reason the rest of it exists. What you tell a prospect is that
-every finding in the document points at something they can see in their own
-source with Ctrl+U, and a tool that let an unreconciled finding through would
-make that worthless. Where a finding compares that source against their Google
-listing, the listing side is the app's capture rather than theirs, and it is
-worth saying so out loud when you hand the document over.
+Step three is why the rest exists. You tell a prospect that every finding in the
+document points at something they can see in their own source with Ctrl+U, and a
+tool that let an unreconciled finding through would make that worthless. Where a
+finding compares that source against their Google listing, the listing side is
+the app's capture rather than theirs. Say so when you hand the document over.
 
-Generation records everything it writes as **prepared**, which is a long way
-from approved, because a finished branded document sitting in a folder already
-looks done and the only thing between it and a prospect is memory.
+Generation records everything it writes as **prepared**, which is not approved.
+A finished branded document sitting in a folder already looks done, and the only
+thing between it and a prospect is memory.
 
 ## Making the work look like yours
 
 Three optional settings, none of which can change a finding.
 
-- **Brand voice.** Instructions for the model that rewords findings into
-  owner-facing sentences, in Settings. Tone and word choice: it rides below the
-  rules the model may not break, so it cannot add a fact, a number or a
-  consequence. Every sentence still passes the headline validator, and a
-  sentence that invents a figure the checks did not measure refuses to
-  generate.
+- **Brand voice.** Instructions in Settings for the model that rewords findings
+  into owner-facing sentences. It steers tone and word choice, and it sits
+  below the rules the model may not break, so it cannot add a fact, a number or
+  a consequence. Every sentence still passes the headline validator, and one
+  that invents a figure the checks did not measure refuses to generate.
 - **An accent colour.** Six-digit hex. It replaces the highlight on the
   scorecard, and the app picks black or white text against it by measured
-  contrast. Severity shading deliberately stays on the house scale, so a
-  serious finding still reads as serious in anyone's colours.
-- **A logo.** PNG or JPEG under 512KB, chosen through a file picker that runs
-  in the main process. A copy is stored in `data/brand/`, so moving the
-  original later does not break your documents, and the file is re-checked
-  before every embed.
+  contrast. Severity shading stays on the house scale, so a serious finding
+  still reads as serious in anyone's colours.
+- **A logo.** PNG or JPEG under 512KB. Assay keeps its own copy in
+  `data/brand/`, so moving the original later does not break your documents.
 
 Regenerating an artifact you already approved changes its bytes, so the
-approval gate flags it and refuses the stale token. That is the same wall that
-stops approve-edit-send, and a rebrand is simply the first thing that triggers
-it on purpose: re-approve, and it clears.
+approval gate flags it and refuses the stale token. It is the same wall that
+stops approve-edit-send. Re-approve and it clears.
 
 **What the model is allowed to do.** Scores and severities are computed by
 code, from three inputs: the raw source, the Google Places listing fields
@@ -126,9 +120,8 @@ npm start
 ### Where it puts things
 
 Everything the app writes goes to **one folder next to the install**, `data/`,
-which is gitignored. The one exception is PDF rendering, which writes a
-temporary HTML file to the system temp folder and removes it after the print.
-The folder
+which is gitignored. PDF rendering is the one exception: it writes a temporary
+HTML file to the system temp folder and removes it after the print. The folder
 carries a generated `README.md` explaining itself, so it does not need this one.
 
 ```
@@ -168,15 +161,14 @@ environment variables are read as a read-only fallback.
 | `GOOGLE_PLACES_API_KEY` | business discovery | Needs **Places API (New)**, not the legacy Places API, with billing active. The only key this build reads. |
 
 **There is deliberately no Anthropic, Lob or PostGrid key field.** The Agent SDK
-path is not built, so `auto` mode always uses the `claude` CLI, and there is no
-sender in this build at all. Those fields used to accept a real API key and
-write it to disk where nothing would ever read it. Settings now shows them as
-not wired and the main process refuses to store them, because a stored secret
-with no consumer is a liability with no upside.
+path is not built, so `auto` mode always uses the `claude` CLI, and no sender
+exists in this build. Settings shows those fields as not wired and the app
+refuses to store them. A stored secret with no consumer is a liability with no
+upside.
 
 The agent path shells out to the `claude` CLI so the work draws on a Pro/Max
-plan rather than metered API spend. Run `claude login` once. The app runs
-without it and simply produces blunter headlines; it cannot change a finding.
+plan rather than metered API spend. Run `claude login` once. Without it the app
+still runs and produces blunter headlines; it cannot change a finding.
 
 ## Tests
 
@@ -228,8 +220,8 @@ PNG without spending a Places request.
   homepage, robots.txt, llms.txt and sitemap.xml. Paste them and the site-wide
   score is reproduced from your own source and confirms; leave a page the score
   rests on blank and the finding stays **unconfirmed** with a note to paste it,
-  never mislabelled as the site answering crawlers differently than browsers. It
-  is more manual than a single-page confirmation, but it is now possible.
+  never mislabelled as the site answering crawlers differently than browsers.
+  It is more manual than a single-page confirmation.
 - **The llms.txt coverage band is a judgement call.** It is implemented as
   "every real page in the sitemap also appears in llms.txt", which is computable
   but is not exactly what the published rubric meant. The expectation excludes

@@ -18,28 +18,24 @@ those is not on this roadmap and will not be added to it.
 
 Three things this repo calls deliberate are on this list. There is no sender.
 Everything runs through the window. Confirmations do not survive a restart, on
-purpose. A reader is entitled to put those three sentences next to these three
-items and conclude that "on purpose" was only ever "not yet," and I would rather
-answer that here than in a comment thread.
+purpose. A reader can put those three sentences next to these three items and
+conclude that "on purpose" was only ever "not yet."
 
-So: a file cannot prove intent, because I am the one person who can edit it.
-What can prove it is a test. Before any sender ships, the suite gets a case that
-fails the build on any send path that does not take exactly one artifact per
-explicit human action, meaning no queue, no batch, no send-all and no schedule,
-and on any path that approves an artifact without a human action. Deleting that
-test is not the only way to defeat it; weakening it is easier, so the thing to
-check is the assertion, not the filename.
+A file cannot prove intent, because I am the one person who can edit it. A test
+can. Before any sender ships, the suite gets a case that fails the build on any
+send path that does not take exactly one artifact per explicit human action: no
+queue, no batch, no send-all, no schedule. Same for any path that approves an
+artifact without a human action. Weakening that test is easier than deleting it,
+so check the assertion rather than the filename.
 
-Two things I will not dress up. Until that test exists there is nothing on this
-page a reader can verify, which is exactly the complaint the paragraph above
-concedes. And the pacing rule that would notice a fast sequence
-(`src/main/confirmation/policy.ts`) warns rather than blocks, deliberately, so
-today the only thing between the shipped design and a sequence is a person
-clicking N times.
+Until that test exists there is nothing on this page a reader can verify. And
+the pacing rule that would notice a fast sequence
+(`src/main/confirmation/policy.ts`) warns rather than blocks, so today the only
+thing between the shipped design and a sequence is a person clicking N times.
 
-The distinction I am drawing, and I think it is a real one: **a sender is a
-socket. A sequence is a business model.** The first is a convenience I want. The
-second is the thing this tool exists in opposition to.
+**A sender sends one artifact when I click send. A sequence sends many without
+me.** The first is a convenience I want. The second is what this tool exists in
+opposition to.
 
 ---
 
@@ -136,9 +132,9 @@ it logs every scan it was asked to run and by whom, and it refuses a target the
 operator has not accepted. It cannot reconcile, it cannot approve, and it cannot
 send.
 
-Why it is worth building anyway: what this tool measures is which
-machine-readable signals a business publishes for an assistant to read. A
-version of that measurement the assistants can run themselves closes the loop.
+It is worth building anyway. This tool measures which machine-readable signals a
+business publishes for an assistant to read, and a version of that measurement
+the assistants can run themselves closes the loop.
 
 ---
 
