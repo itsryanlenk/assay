@@ -90,7 +90,6 @@ function scrubTermsState(root) {
   return { present: true, terms };
 }
 
-/** Every leak in one file's text, as human-readable reasons. */
 /**
  * A North American phone number in a form a business publishes.
  *
@@ -122,6 +121,7 @@ const cityStateZip = /\b[A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)*,\s*[A-Z]{2}\s
 /** ZIPs used by fixtures. 00000 is not assignable; 12345 is a known dummy. */
 const FICTIONAL_ZIPS = new Set(['00000', '12345', '99999']);
 
+/** Every leak in one text, as human-readable reasons. */
 function leaksIn(text, terms) {
   const found = [];
   if (winUserPath.test(text)) found.push('an absolute Windows user path');

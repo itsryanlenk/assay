@@ -41,8 +41,8 @@
 # from the pinned npm package, never committed into this MIT repo.
 /assets/vendor/
 
-# Secrets. The real key store lives in %APPDATA%/assay/config.json, outside
-# the repo entirely; these cover a stray copy landing here.
+# Secrets. The real key store is <data root>/config.json, under /data/ above
+# by default; these cover a stray copy landing in the repo root.
 /.env
 /.env.local
 /config.json

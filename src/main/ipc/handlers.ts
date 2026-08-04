@@ -46,18 +46,14 @@ const PACKET_RENDERERS: Renderer[] = [
 
 /**
  * Where the woff2 files copy-assets.js produces live, so the PDF can embed
- * them. Resolved from the app path rather than __dirname because a packaged
- * build serves them from inside the asar.
- */
-/**
- * Resolved from this file's own location, the way main.ts resolves APP_ROOT,
- * rather than from app.getAppPath().
+ * them. Resolved from this file's own location, the way main.ts resolves
+ * APP_ROOT, rather than from app.getAppPath().
  *
  * getAppPath() answers a different question depending on how Electron was
  * started: `electron .` gives the repo, `electron scripts/test-ipc.js` gives
  * the script's folder. The suite took the second path, so the fonts were
- * never found there and every PDF it printed silently fell back to Arial
- * while asserting only that SOME font was embedded. Found when the pre-merge
+ * never found there and every PDF it printed fell back to Arial while
+ * asserting only that SOME font was embedded. Found when the pre-merge
  * verification pass showed that assertion could not fail.
  */
 const fontsDir = (): string => path.resolve(__dirname, '..', '..', '..', '..', 'assets', 'fonts');

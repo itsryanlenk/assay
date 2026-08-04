@@ -14,7 +14,7 @@ it mattered. Not a list of files. -->
 A feature includes the tests that pin its behavior. Paste the relevant test
 output or name the test. -->
 
-- [ ] `npm test` passes locally (two gates + five suites)
+- [ ] `npm test` passes locally (two gates + six suites)
 - [ ] `npm run typecheck` is clean
 - [ ] Added or updated a test that fails without this change
 

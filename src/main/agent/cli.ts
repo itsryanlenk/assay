@@ -6,7 +6,7 @@
  * key. Anthropic shipped a parallel path that authenticates the Agent SDK
  * itself against a subscription, but their own support page had it marked
  * PAUSED as of 2026-07-28, so the primary path deliberately does not depend
- * on it. See sdk-subscription.ts for the switchover point.
+ * on it. See resolve.ts for the switchover point.
  *
  * WHY THE FLAGS ARE NOT OPTIONAL. Measured on this machine 2026-07-29,
  * answering the single word "PONG":

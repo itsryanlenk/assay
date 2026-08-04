@@ -17,8 +17,8 @@
  * NORMALISATION IS THE WHOLE GAME. A false "mismatch" is the worst possible
  * output of this check, worse than missing a real one, because it hands the
  * operator a claim that falls apart the moment the business reads it:
- *   - Phone: stripped to digits, and compared on the LAST 10 when one side
- *     carries a country code and the other does not.
+ *   - Phone: trailing extension stripped, then digits only, compared on the
+ *     LAST 10 when one side carries a country code and the other does not.
  *   - Name: lowercased, punctuation stripped, trailing legal suffix stripped
  *     (inc, llc, ltd, co, corporation, company, pte).
  *   - Address: the street number and the postal code are compared
@@ -79,9 +79,25 @@ function last10(digits: string): string {
   return digits.length > 10 ? digits.slice(-10) : digits;
 }
 
+/**
+ * Drops a trailing extension ("x12", "ext. 12", "#12", a tel: href's
+ * ";ext=12") before digits are compared. Without this, a listing phone
+ * carrying an extension has more than ten digits, last10 keeps the extension
+ * and drops area-code digits instead, and the comparison names the business's
+ * own correct number as wrong, at this check's top severity.
+ */
+function stripExtension(phone: string): string {
+  return phone.replace(/[\s,;]*(?:x|ext\.?|extension|#)[\s.:=]*\d{1,6}\s*$/i, '');
+}
+
+/** The digits a phone is actually compared on: extension gone, country code trimmed by last10. */
+function phoneKey(phone: string): string {
+  return last10(digitsOnly(stripExtension(phone)));
+}
+
 function phonesMatch(a: string, b: string): boolean {
-  const da = last10(digitsOnly(a));
-  const db = last10(digitsOnly(b));
+  const da = phoneKey(a);
+  const db = phoneKey(b);
   return da.length >= 7 && db.length >= 7 && da === db;
 }
 
@@ -284,7 +300,7 @@ function phonesOnPage(visible: string, html: string): string[] {
   const seen = new Set<string>();
 
   const add = (raw: string): void => {
-    const key = last10(digitsOnly(raw));
+    const key = phoneKey(raw);
     if (key.length < 10 || seen.has(key)) return;
     seen.add(key);
     found.push(raw.trim());
@@ -309,13 +325,13 @@ function comparePhone(
   visibleForPhones: string,
   htmlForPhones: string
 ): AspectResult {
-  if (!placesPhone || last10(digitsOnly(placesPhone)).length < 7) {
+  if (!placesPhone || phoneKey(placesPhone).length < 7) {
     return {
       state: 'no-reference',
       detail: 'Phone: the Google listing has no usable phone number on file, so phone could not be cross-checked.',
     };
   }
-  const placesD = last10(digitsOnly(placesPhone));
+  const placesD = phoneKey(placesPhone);
 
   if (sitePhoneJsonLd) {
     if (phonesMatch(sitePhoneJsonLd, placesPhone)) return { state: 'match' };
@@ -343,7 +359,7 @@ function comparePhone(
    * for one business is the severity-4 hook this check exists to produce;
    * an absence is a two.
    */
-  const onPage = phonesOnPage(visibleForPhones, htmlForPhones).filter((p) => last10(digitsOnly(p)) !== placesD);
+  const onPage = phonesOnPage(visibleForPhones, htmlForPhones).filter((p) => phoneKey(p) !== placesD);
   if (onPage.length > 0) {
     return {
       state: 'mismatch',
@@ -565,6 +581,44 @@ function worst(list: Verdict[]): Verdict {
   return list.reduce((a, b) => (b.severity > a.severity ? b : a));
 }
 
+/**
+ * Builds the aspect set from raw HTML and a candidate. This is the one path:
+ * run() calls it, and scripts/test-parsers.js exercises it directly (same
+ * rationale as crawl-index.ts's __test export). The phone false-positive was
+ * a wiring bug between the comparison and its inputs, and a test that calls
+ * comparePhone directly would have passed while the shipped path stayed
+ * broken. A test seam that is a copy of the shipped wiring cannot catch a
+ * wiring bug either, so run() and the tests share this function.
+ */
+function aspectsFor(html: string, candidate: Candidate): Aspects {
+  const nodes = extractJsonLdNodes(html);
+  const business = findBusinessNode(nodes);
+  const { streetAddress: rawStreet, postalCode: sitePostalJsonLd } = business
+    ? addressFields(business)
+    : { streetAddress: null, postalCode: null };
+  const visible = visibleText(html);
+  return {
+    phone: comparePhone(
+      business ? stringField(business, 'telephone') : null,
+      digitsOnly(html),
+      candidate.phone,
+      visible,
+      html
+    ),
+    street: compareStreetNumber(
+      rawStreet ? leadingStreetNumber(rawStreet) : null,
+      visible,
+      leadingStreetNumber(candidate.address)
+    ),
+    postal: comparePostalCode(sitePostalJsonLd, visible, extractPostalCode(candidate.address)),
+    name: compareName(
+      business ? stringField(business, 'name') : null,
+      normalizeForSearch(visible),
+      candidate.name
+    ),
+  };
+}
+
 const HEADLINE_SYSTEM_PROMPT = [
   'You rephrase ONE already-diagnosed website problem into a sentence a small-business owner would understand.',
   'You are not an auditor. The diagnosis is done. Your only job is wording.',
@@ -621,31 +675,8 @@ export const napConsistencyCheck: FlawCheck = {
       };
     }
 
-    const nodes = extractJsonLdNodes(html);
-    const business = findBusinessNode(nodes);
-
-    const siteNameJsonLd = business ? stringField(business, 'name') : null;
-    const sitePhoneJsonLd = business ? stringField(business, 'telephone') : null;
-    const { streetAddress: siteStreetJsonLdRaw, postalCode: sitePostalJsonLd } = business
-      ? addressFields(business)
-      : { streetAddress: null, postalCode: null };
-    const siteStreetJsonLd = siteStreetJsonLdRaw ? leadingStreetNumber(siteStreetJsonLdRaw) : null;
-
-    const visible = visibleText(html);
-    const normalizedVisible = normalizeForSearch(visible);
-    const htmlDigits = digitsOnly(html);
-
-    const placesName = ctx.candidate.name;
-    const placesPhone = ctx.candidate.phone;
-    const placesStreetNumber = leadingStreetNumber(ctx.candidate.address);
+    const aspects = aspectsFor(html, ctx.candidate);
     const placesPostalCode = extractPostalCode(ctx.candidate.address);
-
-    const aspects: Aspects = {
-      phone: comparePhone(sitePhoneJsonLd, htmlDigits, placesPhone, visible, html),
-      street: compareStreetNumber(siteStreetJsonLd, visible, placesStreetNumber),
-      postal: comparePostalCode(sitePostalJsonLd, visible, placesPostalCode),
-      name: compareName(siteNameJsonLd, normalizedVisible, placesName),
-    };
 
     const all = verdicts(aspects, ctx.candidate, placesPostalCode);
     const verdict = worst(all);
@@ -711,42 +742,6 @@ export const napConsistencyCheck: FlawCheck = {
 };
 
 /** Exported for scripts/test-parsers.js only, same rationale as crawl-index.ts's __test export. */
-/**
- * Builds the aspect set the way run() does, from raw HTML and a candidate.
- *
- * Exposed because the phone false-positive was a wiring bug between the
- * comparison and its inputs, and a test that calls comparePhone directly
- * would have passed while the shipped path stayed broken.
- */
-function aspectsFor(html: string, candidate: Candidate): Aspects {
-  const nodes = extractJsonLdNodes(html);
-  const business = findBusinessNode(nodes);
-  const { streetAddress: rawStreet, postalCode: sitePostalJsonLd } = business
-    ? addressFields(business)
-    : { streetAddress: null, postalCode: null };
-  const visible = visibleText(html);
-  return {
-    phone: comparePhone(
-      business ? stringField(business, 'telephone') : null,
-      digitsOnly(html),
-      candidate.phone,
-      visible,
-      html
-    ),
-    street: compareStreetNumber(
-      rawStreet ? leadingStreetNumber(rawStreet) : null,
-      visible,
-      leadingStreetNumber(candidate.address)
-    ),
-    postal: comparePostalCode(sitePostalJsonLd, visible, extractPostalCode(candidate.address)),
-    name: compareName(
-      business ? stringField(business, 'name') : null,
-      normalizeForSearch(visible),
-      candidate.name
-    ),
-  };
-}
-
 export const __test = {
   aspectsFor,
   phonesOnPage,

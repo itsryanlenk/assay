@@ -1330,13 +1330,90 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
   const same = NAP.__test.aspectsFor(siteHtml, cand('(555) 000-1111'));
   eq('a matching number still reads as text-only when it is not in JSON-LD',
     same.phone.state, 'text-only');
+
+  /**
+   * REGRESSION (release-day pass, 2026-08-04). A listing phone carrying an
+   * extension ("(555) 000-1111 x12") has twelve digits, so last10 kept the
+   * extension and dropped two area-code digits, and the comparison then named
+   * the business's own correct number as wrong, at this check's top severity.
+   * The false accusation this check exists to avoid, produced by its own
+   * normaliser. Extensions are stripped before digits are compared.
+   */
+  const ext = NAP.__test.aspectsFor(
+    '<p>Call (555) 000-1111 today</p>', cand('(555) 000-1111 x12'));
+  eq('a listing phone with an x-extension still matches the same number on the page',
+    ext.phone.state, 'text-only');
+
+  const extJsonLd = NAP.__test.aspectsFor(
+    '<script type="application/ld+json">{"@type":"LocalBusiness","name":"Example Plumbing","telephone":"(555) 000-1111"}</script>',
+    cand('(555) 000-1111 ext. 12'));
+  eq('an "ext." extension matches against JSON-LD', extJsonLd.phone.state, 'match');
+
+  eq('phonesMatch ignores a trailing "#" extension',
+    NAP.__test.phonesMatch('(555) 000-1111', '555-000-1111 #12'), true);
+
+  eq('a country-code prefix still matches on the last ten digits',
+    NAP.__test.phonesMatch('+1 555 000 1111', '(555) 000-1111'), true);
+
+  const extDiff = NAP.__test.aspectsFor(siteHtml, cand('(555) 000-2222 x9'));
+  eq('stripping the extension does not forgive a genuinely different number',
+    extDiff.phone.state, 'mismatch');
+}
+
+// --- nap: run() end to end, through the same aspect path the tests use ------
+/**
+ * run() must go through aspectsFor, not a private copy of it. This drives a
+ * scan through run() itself with every field agreeing and the listing phone
+ * carrying an extension, and expects severity 0: if run() ever grows its own
+ * comparison wiring again, the wiring bug shows up here even while every
+ * aspectsFor unit test above stays green.
+ */
+async function napRunEndToEnd() {
+  const NAP = require(path.join(ROOT, 'dist/main/main/checks/nap-consistency.js'));
+  const html =
+    '<script type="application/ld+json">' +
+    JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'LocalBusiness',
+      name: 'Example Plumbing',
+      telephone: '(555) 000-1111',
+      address: { '@type': 'PostalAddress', streetAddress: '100 Example Rd', postalCode: '00000' },
+    }) +
+    '</script><p>Example Plumbing, 100 Example Rd, Springfield ST 00000. Call (555) 000-1111.</p>';
+  let agentCalls = 0;
+  const ctx = {
+    candidate: {
+      name: 'Example Plumbing',
+      address: '100 Example Rd, Springfield, ST 00000, USA',
+      phone: '(555) 000-1111 x12',
+      website: 'https://example.test/',
+    },
+    scanId: 'test-scan',
+    evidenceRoot: '(unused)',
+    agent: { run: async () => { agentCalls++; return { ok: false, text: '' }; } },
+    fetch: async () => ({ body: html, ref: { httpStatus: 200, truncated: false } }),
+  };
+  const finding = await NAP.napConsistencyCheck.run(ctx);
+  eq('run(): full agreement with an extension on the listing phone is severity 0',
+    finding.severity, 0);
+  eq('run(): and status ok', finding.status, 'ok');
+  eq('run(): severity 0 never calls the model', agentCalls, 0);
 }
 
 // --- report -----------------------------------------------------------------
-console.log('\n--- PARSER TESTS ---');
-if (failures.length) {
-  for (const f of failures) console.log(`  FAIL  ${f}`);
-}
-console.log(`\n  ${pass}/${pass + failures.length} passed${failures.length ? ', FAIL' : ', PASS'}\n`);
-process.exit(failures.length ? 1 : 0);
+// The exit code is set pessimistic BEFORE the async tail. If the awaited work
+// ever hangs, Node drains the event loop and exits without running the report,
+// and the default code of 0 would convert every recorded failure above into a
+// silent PASS. Only the report line below may declare success.
+process.exitCode = 1;
+napRunEndToEnd()
+  .catch((err) => failures.push(`nap run() end-to-end threw\n      ${err && err.stack ? err.stack : err}`))
+  .then(() => {
+    console.log('\n--- PARSER TESTS ---');
+    if (failures.length) {
+      for (const f of failures) console.log(`  FAIL  ${f}`);
+    }
+    console.log(`\n  ${pass}/${pass + failures.length} passed${failures.length ? ', FAIL' : ', PASS'}\n`);
+    process.exit(failures.length ? 1 : 0);
+  });
 

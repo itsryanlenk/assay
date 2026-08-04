@@ -12,6 +12,10 @@
  *
  * A tree-clean gate cannot catch a history leak. This one can.
  *
+ * Commit MESSAGES are scanned too, not just trees. Two of the leaks that
+ * forced the 2026-08-04 rebuild sat in commit messages, where no file walker
+ * will ever look, and a message is published exactly as permanently as a blob.
+ *
  * Usage:
  *   node scripts/check-history.js              # every commit not on origin/main
  *   node scripts/check-history.js <range>      # any git rev-list range
@@ -31,6 +35,23 @@ function git(args) {
 
 /** Text files only. A binary blob cannot carry a term we would recognise. */
 const TEXTUAL = /\.(js|ts|tsx|json|md|yml|yaml|html|css|txt|sh|ps1)$/i;
+
+/**
+ * Noreply hosts a co-author trailer legitimately carries, exempt by DOMAIN
+ * rather than by line. An earlier version stripped whole trailer lines
+ * before scanning, which also hid a client name, phone or address that a
+ * trailer happened to carry, and a leak in a commit message is the exact
+ * class that forced the 2026-08-04 rebuild. Killed by the release-day
+ * adversary pass. Every character of every message is scanned; the one
+ * finding excused is "this well-known noreply host appeared". (Bare
+ * domains, not addresses, so this file cannot flag itself.)
+ */
+const SAFE_MESSAGE_DOMAINS = new Set(['anthropic.com', 'users.noreply.github.com']);
+
+function excusedMessageFinding(reason) {
+  const prefix = 'email domain ';
+  return reason.startsWith(prefix) && SAFE_MESSAGE_DOMAINS.has(reason.slice(prefix.length));
+}
 
 function main() {
   const range = process.argv[2] || defaultRange();
@@ -52,8 +73,11 @@ function main() {
   try {
     commits = git(['rev-list', range]).split('\n').filter(Boolean);
   } catch {
-    console.log('\n--- HISTORY LEAK SCAN ---\n  Range not resolvable; nothing scanned.\n');
-    return 0;
+    // A gate that cannot resolve what it was asked to scan must refuse, the
+    // same way the missing-.scrub-terms branch above refuses: exiting 0 here
+    // let a typo'd or unresolvable range publish unscanned history.
+    console.error(`\n--- HISTORY LEAK SCAN ---\n  REFUSING: range "${range}" is not resolvable, so nothing was scanned.\n`);
+    return 1;
   }
 
   /**
@@ -105,10 +129,23 @@ function main() {
         problems.push(`${commit.slice(0, 9)}  ${file}  <-  ${reason}`);
       }
     }
+
+    // Every commit in the range is new work, so a message finding has no
+    // baseline to be excused by.
+    let message = '';
+    try {
+      message = git(['show', '-s', '--format=%B', commit]);
+    } catch {
+      /* an unreadable message scans as empty */
+    }
+    for (const reason of LEAKS.leaksIn(message, state.terms)) {
+      if (excusedMessageFinding(reason)) continue;
+      problems.push(`${commit.slice(0, 9)}  (commit message)  <-  ${reason}`);
+    }
   }
 
   console.log('\n--- HISTORY LEAK SCAN ---');
-  console.log(`  ${commits.length} commit(s), ${blobsScanned} blob(s), ${state.terms.length} term(s).`);
+  console.log(`  ${commits.length} commit(s), trees and messages, ${blobsScanned} blob(s), ${state.terms.length} term(s).`);
   if (preExisting.size) {
     console.log(`  ${preExisting.size} finding(s) already present on the base, not introduced here:`);
     for (const p of [...preExisting].slice(0, 6)) console.log(`    note  ${p}`);
@@ -119,7 +156,7 @@ function main() {
     console.log(
       `\n  ${problems.length} problem(s) in history, FAIL.\n` +
         `  A leak in an ancestor commit is published even when the tip is clean.\n` +
-        `  Rewrite the TREES, not just the messages, then re-run this.\n`
+        `  Rewrite the offending commits, trees and messages both, then re-run this.\n`
     );
     return 1;
   }

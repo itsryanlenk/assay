@@ -102,6 +102,41 @@ function findByCheck(findings: FlawFinding[], id: FlawFinding['checkId']): FlawF
   return findings.find((f) => f.checkId === id);
 }
 
+/**
+ * Facts this packet itself disputes.
+ *
+ * A nap-consistency mismatch carries the disputed digits in its own detail,
+ * which is exactly what puts them in the measured set, so without this the
+ * kit pasted the listing's phone number into markup the owner is told to
+ * publish while the scorecard in the same envelope said the site's own pages
+ * carry a different one and either side could be the right one. Contested is
+ * the opposite of corroborated. Found reading a generated packet on the
+ * 2026-08-04 release pass.
+ *
+ * The variant names only the WORST verdict, and one scan can prove a phone
+ * mismatch and an address mismatch at once, so the "Also found" text is
+ * checked as well. The patterns are the fixed openings of nap-consistency's
+ * mismatch details; the release-pass test in test-packet.js pins the pairing,
+ * so a rewording there that slips past these patterns fails the suite.
+ */
+function disputedFacts(findings: FlawFinding[]): { phone: boolean; address: boolean } {
+  let phone = false;
+  let address = false;
+  for (const f of findings) {
+    if (f.checkId !== 'nap-consistency') continue;
+    const text = f.detail ?? '';
+    if (f.variant === 'phone-mismatch' || /Phone: Google lists/.test(text)) phone = true;
+    if (
+      f.variant === 'street-mismatch' ||
+      f.variant === 'postal-mismatch' ||
+      /(Street number|Postal code): Google lists/.test(text)
+    ) {
+      address = true;
+    }
+  }
+  return { phone, address };
+}
+
 // ---------------------------------------------------------------------------
 // Address. Places formats as "street, town, ST zip, country" (same
 // assumption ../paths.ts's businessSlug makes). Best effort: a shape that
@@ -234,7 +269,8 @@ function buildGraph(
   origin: string | null,
   schemaType: string,
   addr: AddressParts,
-  measured: Set<string>
+  measured: Set<string>,
+  disputed: { phone: boolean; address: boolean }
 ): { graph: JsonNode[]; phoneIncluded: boolean; addressIncluded: boolean } {
   const orgId = origin ? `${origin}/#org` : '#org';
   const websiteId = origin ? `${origin}/#website` : '#website';
@@ -242,12 +278,16 @@ function buildGraph(
   const org: JsonNode = { '@type': schemaType, '@id': orgId, name: candidate.name };
   if (origin) org.url = origin;
 
-  const phoneIncluded = Boolean(candidate.phone) && allMeasured(candidate.phone ?? '', measured);
+  const phoneIncluded =
+    Boolean(candidate.phone) && allMeasured(candidate.phone ?? '', measured) && !disputed.phone;
   if (phoneIncluded) org.telephone = candidate.phone;
 
   const addressDigits = [addr.streetAddress ?? '', addr.postalCode ?? ''].join(' ');
   const addressIncluded =
-    Boolean(addr.streetAddress) && Boolean(addr.postalCode) && allMeasured(addressDigits, measured);
+    Boolean(addr.streetAddress) &&
+    Boolean(addr.postalCode) &&
+    allMeasured(addressDigits, measured) &&
+    !disputed.address;
   if (addressIncluded) {
     const postal: JsonNode = { '@type': 'PostalAddress' };
     if (addr.streetAddress) postal.streetAddress = addr.streetAddress;
@@ -271,7 +311,8 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   const origin = originOf(candidate.website);
   const schemaType = schemaTypeFor(candidate.primaryType);
   const addr = parseAddress(candidate.address);
-  const { graph, phoneIncluded, addressIncluded } = buildGraph(candidate, origin, schemaType, addr, measured);
+  const disputed = disputedFacts(findings);
+  const { graph, phoneIncluded, addressIncluded } = buildGraph(candidate, origin, schemaType, addr, measured, disputed);
 
   const categoryWords = stemTerms(candidate.primaryType, candidate.name);
   const categoryLabel = categoryWords.length ? titleCase(categoryWords) : null;
@@ -338,15 +379,23 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   lines.push(
     phoneIncluded
       ? '- `telephone`: your Google Business Profile listing.'
-      : '- `telephone`: left out. Your Google Business Profile lists a number for you, but this scan\'s ' +
-          'confirmed findings do not independently state it, so it is not pasted in unverified. Add it yourself ' +
-          'once you have checked it against your own page.'
+      : disputed.phone
+        ? '- `telephone`: left out. This scan found the number on your Google listing and the number on ' +
+            'your own site disagree, and pasting either would take a side. The scorecard names both. Settle ' +
+            'which is right, fix the wrong one, then add the survivor here.'
+        : '- `telephone`: left out. Your Google Business Profile lists a number for you, but this scan\'s ' +
+            'confirmed findings do not independently state it, so it is not pasted in unverified. Add it yourself ' +
+            'once you have checked it against your own page.'
   );
   lines.push(
     addressIncluded
       ? '- `address`: your Google Business Profile listing.'
-      : '- `address`: left out, same reason as telephone above. This scan\'s confirmed findings do not ' +
-          'corroborate the digits, so paste your own once you have checked them against your own page.'
+      : disputed.address
+        ? '- `address`: left out. This scan found the address on your Google listing and the address on ' +
+            'your own site disagree, and pasting either would take a side. The scorecard names both. Settle ' +
+            'which is right, fix the wrong one, then add the survivor here.'
+        : '- `address`: left out. This scan\'s confirmed findings do not corroborate the digits, so it is ' +
+            'not pasted in unverified. Add your own once you have checked it against your own page.'
   );
   lines.push(
     '- `sameAs`: not included. This scan\'s evidence does not contain any profile link confirmed as belonging to ' +

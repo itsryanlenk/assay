@@ -2,9 +2,11 @@
  * THE ONLY WAY TARGET-SITE BYTES ENTER THIS APPLICATION.
  *
  * Law 1 of this project: AI-summarized page content is never evidence, raw
- * source only. That law is enforced structurally rather than by convention,
- * and this file is where. Only fetchRaw() mints an EvidenceRef, so there is
- * no code path by which a model's description of a page can be cited as
+ * source only. That law is enforced structurally rather than by convention.
+ * Exactly two places mint an EvidenceRef: fetchRaw() here, and the
+ * confirmation gate's storePaste(), wrapping the view-source the operator
+ * pasted from their own browser. Neither involves a model, so there is no
+ * code path by which a model's description of a page can be cited as
  * evidence. Agents in this app are given no fetch tool, no browser and no
  * search; they only ever receive bytes that were already captured, hashed and
  * written to disk here.

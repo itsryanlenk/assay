@@ -623,6 +623,64 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
       promisesCategory === exampleHasCategory, s3);
   }
 
+  // --- the kit must not paste a number the same packet disputes -------------
+  /**
+   * REGRESSION (release-day pass, 2026-08-04), found reading a generated
+   * packet rather than the code. A nap-consistency phone-mismatch finding
+   * carries both numbers in its own detail, which is exactly what puts the
+   * listing's digits in the measured set, so the kit pasted the Google number
+   * into markup the owner is told to publish, while the scorecard in the same
+   * envelope said the site's own pages carry a different number and either
+   * side could be the right one. A digit group can be in the findings because
+   * it is CONTESTED; contested is the opposite of corroborated, and schema
+   * that contradicts the visible page is the kit's own first refusal.
+   */
+  {
+    const SK = require(path.join(ROOT, 'dist/main/main/packet/render/schema-kit.js'));
+    const napPhone = {
+      checkId: 'nap-consistency', status: 'flaw', severity: 4, confirmation: 'operator-confirmed',
+      variant: 'phone-mismatch',
+      headline: 'The phone number on your site does not match the one on your map listing.',
+      detail: "Phone: Google lists (555) 555-0142, the site's own structured data lists (555) 555-0199.",
+      evidence,
+    };
+    const disputedKit = SK.schemaKitRenderer({
+      candidate, findings: [napPhone], score: null, date: '2026-08-04', operator,
+    }).text;
+    ok('a phone number the packet itself disputes is not pasted into the kit',
+      !/"telephone"/.test(disputedKit), 'telephone is in the @graph');
+    ok('and the kit says the two sources disagree rather than picking a side',
+      /`telephone`: left out.*disagree/.test(disputedKit), disputedKit.slice(disputedKit.indexOf('`telephone`'), disputedKit.indexOf('`telephone`') + 220));
+
+    // The variant names only the worst verdict, so an address mismatch that
+    // lost the severity contest to the phone one must still count as disputed.
+    const napBoth = {
+      ...napPhone,
+      detail:
+        napPhone.detail +
+        " Also found: Postal code: Google lists 00000, the site's own structured data lists 00001." +
+        ' Street number: Google lists 170, the site\'s own structured data lists 168.',
+    };
+    const bothKit = SK.schemaKitRenderer({
+      candidate, findings: [napBoth], score: null, date: '2026-08-04', operator,
+    }).text;
+    ok('an also-found address mismatch keeps the address out of the kit too',
+      !/"streetAddress"/.test(bothKit), 'streetAddress is in the @graph');
+
+    // An undisputed, measured number still ships; the exclusion is not a blanket.
+    const corroborated = {
+      ...confirmedFinding, checkId: 'booking-path',
+      detail: 'The tap-to-call link dials (555) 555-0142, and the street address 170 Harbor Rd with postal code 00000 is printed in the footer.',
+    };
+    const cleanKit = SK.schemaKitRenderer({
+      candidate, findings: [corroborated], score: null, date: '2026-08-04', operator,
+    }).text;
+    ok('an undisputed measured phone still ships in the kit',
+      /"telephone": "\(555\) 555-0142"/.test(cleanKit), cleanKit.slice(0, 200));
+    ok('an undisputed measured address still ships in the kit',
+      /"streetAddress": "170 Harbor Rd"/.test(cleanKit), 'no streetAddress in the @graph');
+  }
+
   // --- an evidence hash that happens to be all digits ----------------------
   // REGRESSION from a real run. The scorecard prints the first characters of
   // each capture's sha256 so a reader can confirm they are looking at the same
