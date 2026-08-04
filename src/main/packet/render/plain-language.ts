@@ -26,6 +26,14 @@ import { FlawFinding, Score } from '../../../shared/types';
 export type PlainCopy = {
   /** Owner-facing name for the item. */
   title: string;
+  /**
+   * What the scan found on THEIR site, in the owner's words. The measured
+   * fact behind it is the rubric note, which still prints verbatim in the
+   * scorecard's maintainer-page table; this is the same fact said the way
+   * the rest of the owner page speaks. Like every string here it must be
+   * true of the whole band the key covers, never more specific than that.
+   */
+  found: string;
   /** What the thing is, for somebody who does not read code. */
   means: string;
   /** What not having it prevents. A mechanism, not a prediction. */
@@ -63,6 +71,7 @@ export type PlainCopy = {
 export const ITEM_COPY: Record<string, PlainCopy> = {
   'crawler-access': {
     title: 'Whether AI tools are allowed to read your site',
+    found: "Your site's permission file turns the AI tools away.",
     means:
       'Assistants that answer questions about local businesses have to be allowed to read your pages before they can mention you. One small file on your site says yes or no to each of them.',
     cost:
@@ -73,6 +82,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'crawler-access:partial': {
     title: 'Whether AI tools are allowed to read your site',
+    found: "Your site's permission file lets some AI tools in and turns others away.",
     means:
       'Assistants that answer questions about local businesses have to be allowed to read your pages before they can mention you. One small file on your site says yes or no to each of them.',
     cost:
@@ -83,6 +93,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'llms-txt': {
     title: 'The file that tells software what your site is for',
+    found: 'There is no summary file for software anywhere on your site.',
     means:
       'A short file that lists your pages and says what each one is for, so an assistant reading your site knows what you do and where to look without guessing.',
     cost:
@@ -94,6 +105,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'llms-txt:partial': {
     title: 'The file that tells software what your site is for',
+    found: 'The summary file is there, and it covers only part of your site.',
     means:
       'A short file that lists your pages and says what each one is for, so an assistant reading your site knows what you do and where to look without guessing.',
     cost:
@@ -107,6 +119,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
     // Kept to one line at print width. The longer version wrapped, and the
     // line it cost orphaned the closing promise onto a sheet of its own.
     title: 'What your site tells software about who you are',
+    found: 'Nothing in the hidden format tells software who you are.',
     means:
       'Your pages tell a person your name, where you are and what you do. Software needs the same facts written again in a separate hidden format.',
     cost:
@@ -118,6 +131,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'entity-schema:partial': {
     title: 'What your site tells software about who you are',
+    found: 'The hidden format carries some facts about you, and the ones that tie you to a real company are missing.',
     means:
       'Your pages tell a person your name, where you are and what you do. Software needs the same facts written again in a separate hidden format. Yours has some of them.',
     cost:
@@ -131,6 +145,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
     // The unsuffixed entry is the safe one: true whether or not the answers
     // exist as page copy, because it claims nothing about what was written.
     title: 'The questions your customers actually ask',
+    found: 'Nothing on your site is written as a question with its answer beside it.',
     means:
       'When someone asks an assistant a real question, it looks for businesses that have already answered that question in writing, in a format it can quote directly.',
     cost:
@@ -142,6 +157,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'faq-page:none': {
     title: 'The questions your customers actually ask',
+    found: 'The questions customers ask are not answered anywhere on your site.',
     means:
       'When someone asks an assistant a real question, it looks for businesses that have already answered that question in writing, in a format it can quote directly.',
     cost:
@@ -153,6 +169,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'faq-page:unmarked': {
     title: 'The questions your customers actually ask',
+    found: 'Your answers are on the site, and none of them are in a form software can quote.',
     means:
       'When someone asks an assistant a real question, it looks for businesses that have already answered that question in writing, in a format it can quote directly.',
     cost:
@@ -164,6 +181,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'faq-page:partial': {
     title: 'The questions your customers actually ask',
+    found: 'Software can quote some of your answers, and the rest are written only for people.',
     means:
       'When someone asks an assistant a real question, it looks for businesses that have already answered that question in writing, in a format it can quote directly.',
     cost:
@@ -175,6 +193,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'product-review': {
     title: 'A written list of what you sell',
+    found: 'Nothing on your pages lists what you sell in a form software can read.',
     means:
       'Somewhere on the site there should be a machine-readable list of the services you offer, in the words a customer would use for them.',
     cost:
@@ -186,6 +205,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'product-review:partial': {
     title: 'A written list of what you sell',
+    found: 'Part of what you sell is listed for software, and the rest is not.',
     means:
       'Somewhere on the site there should be a machine-readable list of the services you offer, in the words a customer would use for them.',
     cost:
@@ -197,6 +217,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'plain-words': {
     title: 'Whether you say what you do in plain words',
+    found: 'Your page titles do not use the words a customer would type.',
     means:
       'The words a customer would actually type should appear in the title of your pages, which is the first thing both people and software read.',
     cost:
@@ -207,6 +228,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'plain-words:partial': {
     title: 'Whether you say what you do in plain words',
+    found: 'Your page titles use some of the words a customer would type, and leave out others.',
     means:
       'The words a customer would actually type should appear in the title of your pages, which is the first thing both people and software read.',
     cost:

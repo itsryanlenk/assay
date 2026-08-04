@@ -153,17 +153,19 @@ function ownerSection(items: Score['items']): string {
       // rather than an emphasis and tells the eye nothing about where to start.
       const shade = !done && rank === 0 ? ' yellow' : '';
       /**
-       * The measured fact leads.
+       * The measured fact leads, in the owner's words.
        *
        * These blocks used to open with "What it is", a definition of the
-       * category, and never said what was actually on the reader's site. On a
-       * document whose whole promise is that every claim reproduces with
-       * Ctrl+U, the reader was being told what an llms.txt is and never told
-       * that theirs returns 404. The note is what the check measured, in the
-       * same words the rubric table on page two prints, so page one and page
-       * two now agree line for line.
+       * category, and never said what was actually on the reader's site. The
+       * first fix printed the rubric note verbatim, which put "no Product or
+       * Service node" on the one page this file's header calls the owner's.
+       * `found` is the same fact in this page's own vocabulary; the exact
+       * measured note still prints, word for word, in the rubric table on
+       * the maintainer's page, which is where Ctrl+U reproduction lives. The
+       * fallback keeps an item whose copy predates `found` printing the note
+       * rather than nothing.
        */
-      const found = (i.note ?? '').trim();
+      const found = (copy.found ?? i.note ?? '').trim();
       return [
         `<div class="block${shade}">`,
         `<h2>${escapeHtml(copy.title)}</h2>`,

@@ -513,6 +513,57 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
     }
   }
 
+  // --- owner blocks state what was found, in the owner's language -----------
+  /**
+   * The owner page printed the rubric note verbatim: "no Product or Service
+   * node; no Offer node" on the one page the scorecard's own header calls the
+   * owner's. Every ITEM_COPY entry now carries `found`, the same measured
+   * fact in the words the rest of that page uses; the exact note still prints
+   * in the rubric table on the maintainer's page.
+   */
+  {
+    const PL = require(path.join(ROOT, 'dist/main/main/packet/render/plain-language.js'));
+    for (const [k, c] of Object.entries(PL.ITEM_COPY)) {
+      ok(`item copy ${k} carries found copy`, typeof c.found === 'string' && c.found.trim() !== '', k);
+      const swept = GR.sweep(c.found ?? '');
+      ok(`found copy ${k} passes the guardrail sweep`, swept.length === 0, JSON.stringify(swept));
+      ok(`found copy ${k} carries no digits`, !/\d/.test(c.found ?? ''), c.found);
+      ok(`found copy ${k} never speaks maintainer`,
+        !/\b(node|nodes|JSON|schema|markup|robots\.txt|llms\.txt|FAQPage|sitemap|Offer)\b/i.test(c.found ?? ''),
+        c.found);
+    }
+
+    const SCR = require(path.join(ROOT, 'dist/main/main/packet/render/scorecard.js'));
+    const scored = {
+      instrument: 'aeo-baseline-six-check', instrumentVersion: 't', raw: 40, base: 105, rescaled: 38,
+      naItems: [], markedOut: [],
+      items: [
+        { id: 'product-review', label: 'Products and services', earned: 0, possible: 20, na: false,
+          note: 'no Product or Service node; no Offer node.' },
+        { id: 'llms-txt', label: 'llms.txt', earned: 8, possible: 15, na: false,
+          note: 'llms.txt exists; it lists the homepage only.' },
+        { id: 'faq-page', label: 'FAQ page', earned: 5, possible: 15, na: false,
+          note: 'no FAQPage node; page copy answers in prose.', variant: 'unmarked' },
+      ],
+    };
+    const doc = SCR.scorecardRenderer({
+      candidate, findings: [{ ...confirmedFinding, checkId: 'ai-readiness', score: scored }],
+      score: scored, date: '2026-08-04', operator,
+    }).text;
+    // Split on the ELEMENT, not the string: '.tech-start' appears first in
+    // the stylesheet, and slicing there put the whole owner page out of
+    // reach and passed the absence assertion vacuously.
+    const ownerPage = doc.slice(0, doc.indexOf('<div class="tech-start">'));
+    ok('the owner page states the finding in owner words',
+      /What we found on your site\.<\/b> Nothing on your pages lists what you sell/.test(ownerPage),
+      '(owner found copy missing)');
+    ok('the rubric fragment stays off the owner page',
+      !/no Product or Service node/.test(ownerPage), '(rubric note printed on the owner page)');
+    ok('the rubric table still carries the exact note',
+      /no Product or Service node; no Offer node\./.test(doc.slice(doc.indexOf('<div class="tech-start">'))),
+      '(note gone from the rubric table)');
+  }
+
   // --- the schema kit must not publish a type it did not measure -----------
   // REGRESSION from a real packet. Places typed a heating and cooling company
   // as general_contractor, which mapped straight through to a GeneralContractor
