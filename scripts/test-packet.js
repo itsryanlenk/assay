@@ -467,7 +467,7 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
       'No tel:, mailto:, form or booking link anywhere on the page.'));
     ok('a page with no contact path at all is not told the path lives in a script',
       !/inside a script/i.test(noPath.card), noPath.card.slice(0, 400));
-    ok('the no-contact-path card says the page offers software no way in',
+    ok('the no-contact-path card says the page offers AI no way in',
       /no phone link/i.test(noPath.card), noPath.card.slice(0, 400));
 
     // A homepage that merely omits its address was accused of a phone number

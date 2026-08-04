@@ -622,7 +622,7 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
 
   /**
    * The same defect, latent in every other item: `short` and `phrase` assert a
-   * total absence ("Your site has no short summary written for software") but
+   * total absence ("Your site has no short summary written for AI") but
    * are selected whenever the item merely lost the most points. A site scoring
    * 12 of 15 for a real, sectioned llms.txt would have been sent a postcard
    * saying it had none.

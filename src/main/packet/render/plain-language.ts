@@ -92,19 +92,19 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
     phrase: 'a site turning away some of the AI tools people use to find a local company',
   },
   'llms-txt': {
-    title: 'The file that tells software what your site is for',
-    found: 'There is no summary file for software anywhere on your site.',
+    title: 'The file that tells AI what your site is for',
+    found: 'There is no summary file for AI anywhere on your site.',
     means:
       'A short file that lists your pages and says what each one is for, so an assistant reading your site knows what you do and where to look without guessing.',
     cost:
       'Without it an assistant works the rest out from your page code. It gets less of it right, and what it gets wrong is what it repeats to the person asking.',
     won: 'You have one, and it is doing its job.',
     short:
-      'Your site has no short summary written for software, so assistants guess at what you do from the page code.',
-    phrase: 'a site with no short summary written for software, leaving assistants to guess at what the business does',
+      'Your site has no short summary written for AI, so assistants guess at what you do from the page code.',
+    phrase: 'a site with no short summary written for AI, leaving assistants to guess at what the business does',
   },
   'llms-txt:partial': {
-    title: 'The file that tells software what your site is for',
+    title: 'The file that tells AI what your site is for',
     found: 'The summary file is there, and it covers only part of your site.',
     means:
       'A short file that lists your pages and says what each one is for, so an assistant reading your site knows what you do and where to look without guessing.',
@@ -112,16 +112,16 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
       'Yours exists and does not cover everything. For whatever it leaves out, an assistant is back to working it out from the page code, and what it gets wrong is what it repeats to the person asking.',
     won: 'You have one, and it is doing its job.',
     short:
-      'Your summary for software leaves out part of the site, so assistants still guess at those pages.',
-    phrase: 'a summary written for software that left out part of the site',
+      'Your summary for AI leaves out part of the site, so assistants still guess at those pages.',
+    phrase: 'a summary written for AI that left out part of the site',
   },
   'entity-schema': {
     // Kept to one line at print width. The longer version wrapped, and the
     // line it cost orphaned the closing promise onto a sheet of its own.
-    title: 'What your site tells software about who you are',
-    found: 'Nothing in the hidden format tells software who you are.',
+    title: 'What your site tells AI about who you are',
+    found: 'Nothing in the hidden format tells AI who you are.',
     means:
-      'Your pages tell a person your name, where you are and what you do. Software needs the same facts written again in a separate hidden format.',
+      'Your pages tell a person your name, where you are and what you do. AI needs the same facts written again in a separate hidden format.',
     cost:
       'Yours does not carry them, so an assistant has nothing to tie the business to a real named person or to your listings elsewhere. That is what it uses to decide you are a real company rather than a page it found.',
     won: 'The facts a machine needs are there and they agree with each other.',
@@ -130,16 +130,16 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
     phrase: 'a homepage that never says who the business is in the hidden format AI assistants read',
   },
   'entity-schema:partial': {
-    title: 'What your site tells software about who you are',
+    title: 'What your site tells AI about who you are',
     found: 'The hidden format carries some facts about you, and the ones that tie you to a real company are missing.',
     means:
-      'Your pages tell a person your name, where you are and what you do. Software needs the same facts written again in a separate hidden format. Yours has some of them.',
+      'Your pages tell a person your name, where you are and what you do. AI needs the same facts written again in a separate hidden format. Yours has some of them.',
     cost:
       'The missing parts are the ones that tie the business to a real named person and to your listings elsewhere. That is what an assistant uses to decide you are a real company rather than a page it found.',
     won: 'The facts a machine needs are there and they agree with each other.',
     short:
-      'Your homepage tells software some of who you are, and leaves out the parts that prove you are a real company.',
-    phrase: 'a homepage carrying some of the facts software needs and none of the ones that prove a real company',
+      'Your homepage tells AI some of who you are, and leaves out the parts that prove you are a real company.',
+    phrase: 'a homepage carrying some of the facts AI needs and none of the ones that prove a real company',
   },
   'faq-page': {
     // The unsuffixed entry is the safe one: true whether or not the answers
@@ -169,7 +169,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'faq-page:unmarked': {
     title: 'The questions your customers actually ask',
-    found: 'Your answers are on the site, and none of them are in a form software can quote.',
+    found: 'Your answers are on the site, and none of them are in a form AI can quote.',
     means:
       'When someone asks an assistant a real question, it looks for businesses that have already answered that question in writing, in a format it can quote directly.',
     cost:
@@ -181,7 +181,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'faq-page:partial': {
     title: 'The questions your customers actually ask',
-    found: 'Software can quote some of your answers, and the rest are written only for people.',
+    found: 'AI can quote some of your answers, and the rest are written only for people.',
     means:
       'When someone asks an assistant a real question, it looks for businesses that have already answered that question in writing, in a format it can quote directly.',
     cost:
@@ -193,33 +193,33 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
   },
   'product-review': {
     title: 'A written list of what you sell',
-    found: 'Nothing on your pages lists what you sell in a form software can read.',
+    found: 'Nothing on your pages lists what you sell in a form AI can read.',
     means:
       'Somewhere on the site there should be a machine-readable list of the services you offer, in the words a customer would use for them.',
     cost:
-      'A person reading your pages knows what you do. Software does not, so you are not a candidate when somebody asks for that service by name near your town.',
-    won: 'What you sell is written down where software can read it.',
+      'A person reading your pages knows what you do. AI does not, so you are not a candidate when somebody asks for that service by name near your town.',
+    won: 'What you sell is written down where AI can read it.',
     short:
-      'Nothing on your site lists what you sell in a way software can read, so you are not a candidate when somebody asks for it by name.',
-    phrase: 'a site that never lists what the business sells in a way software can read',
+      'Nothing on your site lists what you sell in a way AI can read, so you are not a candidate when somebody asks for it by name.',
+    phrase: 'a site that never lists what the business sells in a way AI can read',
   },
   'product-review:partial': {
     title: 'A written list of what you sell',
-    found: 'Part of what you sell is listed for software, and the rest is not.',
+    found: 'Part of what you sell is listed for AI, and the rest is not.',
     means:
       'Somewhere on the site there should be a machine-readable list of the services you offer, in the words a customer would use for them.',
     cost:
-      'Part of what you sell is written down for software and part of it is not. For the rest, you are not a candidate when somebody asks for that service by name near your town.',
-    won: 'What you sell is written down where software can read it.',
+      'Part of what you sell is written down for AI and part of it is not. For the rest, you are not a candidate when somebody asks for that service by name near your town.',
+    won: 'What you sell is written down where AI can read it.',
     short:
-      'Only part of what you sell is listed in a way software can read, so you are missed when somebody asks for the rest by name.',
-    phrase: 'a site listing only part of what the business sells in a way software can read',
+      'Only part of what you sell is listed in a way AI can read, so you are missed when somebody asks for the rest by name.',
+    phrase: 'a site listing only part of what the business sells in a way AI can read',
   },
   'plain-words': {
     title: 'Whether you say what you do in plain words',
     found: 'Your page titles do not use the words a customer would type.',
     means:
-      'The words a customer would actually type should appear in the title of your pages, which is the first thing both people and software read.',
+      'The words a customer would actually type should appear in the title of your pages, which is the first thing both people and AI read.',
     cost:
       'Your titles are not doing that work. It is the cheapest thing on this list to change.',
     won: 'Your titles say what you do in the words a customer would use.',
@@ -230,7 +230,7 @@ export const ITEM_COPY: Record<string, PlainCopy> = {
     title: 'Whether you say what you do in plain words',
     found: 'Your page titles use some of the words a customer would type, and leave out others.',
     means:
-      'The words a customer would actually type should appear in the title of your pages, which is the first thing both people and software read.',
+      'The words a customer would actually type should appear in the title of your pages, which is the first thing both people and AI read.',
     cost:
       'The title is doing less work than it could. It is the cheapest thing on this list to change.',
     won: 'Your titles say what you do in the words a customer would use.',
@@ -280,8 +280,8 @@ export const VERDICT_COPY: Record<string, VerdictCopy> = {
     phrase: 'a page that hands back almost no readable text once its scripts are stripped away',
   },
   'website:thin-content': {
-    short: 'Your homepage carries almost no readable text, so software reading it learns almost nothing about your business.',
-    phrase: 'a homepage carrying almost no readable text for software to learn the business from',
+    short: 'Your homepage carries almost no readable text, so AI reading it learns almost nothing about your business.',
+    phrase: 'a homepage carrying almost no readable text for AI to learn the business from',
   },
   'website:parked': {
     short: 'The address on your listing opens a placeholder page rather than your business.',
@@ -359,8 +359,8 @@ export const VERDICT_COPY: Record<string, VerdictCopy> = {
     phrase: 'a contact link that only exists inside a script, so it disappears the moment anything reads the raw page instead of rendering it',
   },
   'booking-path:no-contact-path': {
-    short: 'Your homepage offers no phone link, no email link and no contact form for software to find.',
-    phrase: 'a homepage offering no phone link, email link or contact form for software to find',
+    short: 'Your homepage offers no phone link, no email link and no contact form for AI to find.',
+    phrase: 'a homepage offering no phone link, email link or contact form for AI to find',
   },
   'booking-path:phone-not-tappable': {
     short: 'Your phone number is plain text on the page, with no tap-to-call link in the markup.',
