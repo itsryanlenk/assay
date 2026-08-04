@@ -55,7 +55,7 @@ The project is pre-1.0 and ships from `main`. Only the latest commit on
 
 ## What is in scope
 
-- **SSRF / network egress.** `src/main/evidence/fetch-raw.ts` is the only path
+- SSRF / network egress. `src/main/evidence/fetch-raw.ts` is the only path
   that fetches a target site. It refuses Google Maps/Search hosts and private,
   loopback, link-local and reserved addresses on every redirect hop, and it pins
   the validated address at connect time (a custom dispatcher lookup), so a
@@ -65,19 +65,19 @@ The project is pre-1.0 and ships from `main`. Only the latest commit on
   fixed-host by construction and validates every coordinate; a way to make it
   fetch from anywhere but `tile.openstreetmap.org`, or to reach the filesystem
   through it, is equally in scope.
-- **Electron process boundary.** Context isolation, the preload bridge in
+- Electron process boundary. Context isolation, the preload bridge in
   `src/main/preload.ts`, the IPC channel allow-list in `src/shared/channels.ts`,
   and the renderer CSP. A renderer-to-main escape, an unvalidated IPC payload
   that writes outside the data root, or a navigation/`openExternal` that a
   hostile page can drive is in scope.
-- **The five laws.** The design promises in the README are enforced in code
+- The five laws. The design promises in the README are enforced in code
   (evidence provenance, no fabrication, per-item approval, score transparency,
   discovery surface). A way to make an artifact ship a claim the operator never
   confirmed, or to bypass `assertMinted`, is in scope.
-- **Secret handling.** `data/config.json` holds the operator's Places key. A way
+- Secret handling. `data/config.json` holds the operator's Places key. A way
   to leak it into a packet, a log line, an error message, or a fetched-site
   request is in scope.
-- **Injection into deliverables.** Hostile content on a scanned site reaching
+- Injection into deliverables. Hostile content on a scanned site reaching
   the generated PDF/Markdown packet as executable markup or a live link is in
   scope.
 
@@ -87,10 +87,10 @@ These are documented, understood, and accepted for a single-operator desktop
 tool. They are **not** what to report. A way to *exploit* one beyond its
 stated bound is.
 
-- **No auto-update.** There is no update channel, so there is no update channel
+- No auto-update. There is no update channel, so there is no update channel
   to compromise, and equally no automatic delivery of a security fix. Pull and
   rebuild.
-- **Bundled fonts and Leaflet under a packaged build.** The source repo
+- Bundled fonts and Leaflet under a packaged build. The source repo
   vendors neither; a packaged artifact embeds OFL-1.1 fonts and BSD-2-Clause
   Leaflet and carries their notice requirements. This is a licensing note;
   see `LICENSE`.

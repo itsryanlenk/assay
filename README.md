@@ -56,16 +56,16 @@ thing between it and a prospect is memory.
 
 Three optional settings, none of which can change a finding.
 
-- **Brand voice.** Instructions in Settings for the model that rewords findings
+- Brand voice. Instructions in Settings for the model that rewords findings
   into owner-facing sentences. It steers tone and word choice, and it sits
   below the rules the model may not break, so it cannot add a fact, a number or
   a consequence. Every sentence still passes the headline validator, and one
   that invents a figure the checks did not measure refuses to generate.
-- **An accent colour.** Six-digit hex. It replaces the highlight on the
+- An accent colour. Six-digit hex. It replaces the highlight on the
   scorecard, and the app picks black or white text against it by measured
   contrast. Severity shading stays on the house scale, so a serious finding
   still reads as serious in anyone's colours.
-- **A logo.** PNG or JPEG under 512KB. Assay keeps its own copy in
+- A logo. PNG or JPEG under 512KB. Assay keeps its own copy in
   `data/brand/`, so moving the original later does not break your documents.
 
 Regenerating an artifact you already approved changes its bytes, so the
@@ -178,17 +178,17 @@ npm test
 
 Two gates and six suites:
 
-- **preflight** scans every file git would publish for key shapes, absolute
+- preflight scans every file git would publish for key shapes, absolute
   user paths and live email domains, and fails the build rather than warning.
-- **smoke** boots the real Electron window, fails on console errors, CSP
+- smoke boots the real Electron window, fails on console errors, CSP
   violations or preload faults, and drives the nav rather than asserting the
   markup exists. Losing the single-instance lock is a failure here, not a
   quiet exit, because a gate that cannot tell "passed" from "never ran" is not
   a gate.
-- **IPC** drives the channels through the real preload bridge, with payloads
+- IPC drives the channels through the real preload bridge, with payloads
   and with its refusals, and drives the approvals UI through real clicks.
-- **parsers**, **instrument calibration**, **confirmation gate**, **packet
-  generation** and **approval queue** cover the engine. The calibration suite
+- parsers, instrument calibration, confirmation gate, packet generation and
+  approval queue cover the engine. The calibration suite
   fails the build if the instrument stops reproducing the three published
   scores, and it pins the agent CLI lockout flags.
 
@@ -199,22 +199,22 @@ PNG without spending a Places request.
 
 ## Limitations
 
-- **There is no sender.** `send/provider.ts` defines the outbound
+- There is no sender. `send/provider.ts` defines the outbound
   signature with no implementation. Any sender must call `assertMinted` first.
-- **Opening the map talks to OpenStreetMap.** The scan view can plot results
+- Opening the map talks to OpenStreetMap. The scan view can plot results
   on a street map. Tiles come from `tile.openstreetmap.org`, fetched by the
   main process through a validating proxy and cached under `data/tiles/`;
   the renderer itself still makes no network requests, and no tile is
   fetched until you open the map.
-- **The AI-readiness instrument is calibrated against two delivered client
+- The AI-readiness instrument is calibrated against two delivered client
   scans, which between them publish three scored properties, and nothing
-  else.** That is a small calibration set. `scripts/test-instrument.js`
+  else. That is a small calibration set. `scripts/test-instrument.js`
   fails the build if the instrument stops reproducing those three scores.
-- **Page discovery is best-effort.** The sitemap named in robots.txt is read
+- Page discovery is best-effort. The sitemap named in robots.txt is read
   first, then the conventional path, then same-origin links from the homepage.
   A site that hides its pages behind JavaScript will still be read as one page,
   and the score is refused rather than guessed when that happens.
-- **Confirming a multi-page site takes one paste per page.** Site-wide items
+- Confirming a multi-page site takes one paste per page. Site-wide items
   (entity schema, FAQ) are scored across the pages the crawler discovered, so the
   confirmation UI offers a paste slot for each page it read, alongside the
   homepage, robots.txt, llms.txt and sitemap.xml. Paste them and the site-wide
@@ -222,30 +222,30 @@ PNG without spending a Places request.
   rests on blank and the finding stays **unconfirmed** with a note to paste it,
   never mislabelled as the site answering crawlers differently than browsers.
   It is more manual than a single-page confirmation.
-- **The llms.txt coverage band is a judgement call.** It is implemented as
+- The llms.txt coverage band is a judgement call. It is implemented as
   "every real page in the sitemap also appears in llms.txt", which is computable
   but is not exactly what the published rubric meant. The expectation excludes
   the taxonomy and archive URLs a CMS lists in its sitemap: category, tag and
   author archives, dated post archives, pagination and feeds. An llms.txt
   should not carry them, and docking a business for their absence was noise in
   a client document.
-- **The renderers are template-shaped.** The social post and postcard read
+- The renderers are template-shaped. The social post and postcard read
   acceptably but come from templates.
-- **Confirmations do not survive a restart, on purpose.** They expire 72 hours
+- Confirmations do not survive a restart, on purpose. They expire 72 hours
   after they are made, so persisting one would let a stale confirmation look
   live. The cost is that an artifact prepared in an earlier session has to be
   re-confirmed before it can be approved.
 
 ## Contributing and security
 
-- **Contributing:** the bar and the workflow are in [CONTRIBUTING.md](CONTRIBUTING.md).
+- Contributing: the bar and the workflow are in [CONTRIBUTING.md](CONTRIBUTING.md).
   Short version: the five laws are enforced by tests and types, tests come before
   implementation, and nothing under `data/` or any secret reaches a tracked file.
-- **Security:** the threat model, the reporting channel, and the known accepted
+- Security: the threat model, the reporting channel, and the known accepted
   limitations are in [SECURITY.md](SECURITY.md). Report a vulnerability privately
   through the repository's Security tab, never a public issue.
-- **Conduct:** [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
-- **Changes:** [CHANGELOG.md](CHANGELOG.md).
+- Conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- Changes: [CHANGELOG.md](CHANGELOG.md).
 
 ## Maintainer
 

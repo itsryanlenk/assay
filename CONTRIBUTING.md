@@ -7,17 +7,17 @@ That promise is why several things here are stricter than a typical app.
 
 ## Ground rules
 
-- **The five laws are load-bearing.** Each law in the [README](README.md) has
+- The five laws are load-bearing. Each law in the [README](README.md) has
   a named enforcement point: a test or a type. A change that
   weakens a law must not merge, and in most cases the build will stop you before
   a reviewer does. If you think a law is wrong, open an issue to discuss the law
   first; don't route around it in a PR.
-- **No secrets, no client data, ever.** Nothing under `data/`, no API keys, no
+- No secrets, no client data, ever. Nothing under `data/`, no API keys, no
   real business names, no personal contact details reach a tracked file. The
   preflight gate scans every file git would publish and fails the build on a key
   shape, an absolute user path, or a live email domain. Do not disable it to get
   green.
-- **Tests before implementation.** This engine is reconciliation-heavy and easy
+- Tests before implementation. This engine is reconciliation-heavy and easy
   to get subtly wrong. New behavior lands as a failing test first, then the
   implementation that turns it green.
 
@@ -42,14 +42,14 @@ npm test
 
 This runs two gates and six suites. All must pass to open a PR.
 
-- **preflight** scans every publishable file for secrets, absolute paths, and
+- preflight scans every publishable file for secrets, absolute paths, and
   live email domains. A leak fails the build rather than warning.
-- **smoke** boots the real Electron window, fails on console errors, CSP
+- smoke boots the real Electron window, fails on console errors, CSP
   violations, or preload faults, and drives the navigation. Losing the
   single-instance lock is a failure here, because a gate that cannot tell
   "passed" from "never ran" is no gate at all.
-- **IPC**, **parsers**, **instrument calibration**, **confirmation gate**,
-  **packet generation**, and **approval queue** cover the engine end to end.
+- IPC, parsers, instrument calibration, confirmation gate, packet generation
+  and approval queue cover the engine end to end.
   The calibration suite fails the build if the scoring instrument stops
   reproducing the three published client scores.
 
@@ -82,12 +82,12 @@ npm run preview        # render the UI to a PNG without spending a Places reques
 
 ## Reporting bugs and requesting features
 
-- **Bugs:** open an issue with what you did, what you expected, and what
+- Bugs: open an issue with what you did, what you expected, and what
   happened. A reproduction is worth more than a description: a URL that scans
   wrong, or a packet that renders wrong.
-- **Security issues:** do **not** open a public issue. See
+- Security issues: do **not** open a public issue. See
   [SECURITY.md](SECURITY.md).
-- **Features:** open an issue describing the problem before the solution. This
+- Features: open an issue describing the problem before the solution. This
   tool says no to a lot of features on purpose (no auto-anything); a
   feature that adds bulk sending, scheduled sending, or auto-approval will not
   land. A single-artifact sender is on the [roadmap](ROADMAP.md), with the
