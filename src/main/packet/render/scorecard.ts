@@ -296,15 +296,30 @@ h1 {
 
 .sub { font-size: 13.5px; line-height: 1.45; max-width: 100%; }
 
-.stamp {
-  position: absolute; top: var(--space-36); right: var(--space-40);
-  border: var(--border); background: var(--color-paper); box-shadow: var(--shadow-stamp);
-  padding: var(--space-10) var(--space-16); text-align: right; width: 210px;
-}
-.stamp .lbl { font-family: var(--font-mono); font-size: 10px; font-weight: var(--weight-bold); letter-spacing: var(--tracking-widest); }
-.stamp .big { font-size: 19px; font-weight: var(--weight-bold); line-height: 1.2; }
-
 .rule { border: none; border-top: var(--border-w-thick) solid var(--color-ink); margin: var(--space-22) 0; }
+
+/* THE RUNNING HEADER. The chip, the business name and the generated date, at
+   the top of every printed page: a reader holding page two alone still knows
+   whose document it is. A table head, because Chromium repeats <thead> on
+   every printed fragment and, unlike the print-margin header API, it renders
+   with the document's own embedded fonts. The old floating date stamp and
+   the standalone chip folded into this strip so nothing prints twice. */
+table.pages { width: 100%; border-collapse: collapse; }
+table.pages > thead { display: table-header-group; }
+table.pages > thead > tr > td, table.pages > tbody > tr > td { padding: 0; }
+.runner {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-14);
+  border-bottom: var(--border-w-thick) solid var(--color-ink);
+  padding: 0 0 var(--space-8); margin-bottom: var(--space-14);
+}
+.runner .runner-name {
+  font-family: var(--font-display); font-size: 15px; text-transform: uppercase;
+  letter-spacing: var(--tracking-wide); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.runner .runner-date {
+  font-family: var(--font-mono); font-size: 10px; font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-widest); white-space: nowrap;
+}
 
 .block { border: var(--border); box-shadow: 5px 5px 0 var(--color-ink); padding: var(--space-10) var(--space-14); margin: var(--space-10) 0; background: var(--color-paper); }
 .block.yellow { background: var(--color-yellow); }
@@ -363,8 +378,6 @@ ul.flat li::before { content: ""; position: absolute; left: 0; top: var(--space-
 .badge--sev4 { background: var(--color-cell-bad); }
 
 .sheet-1200 { width: 1200px; padding: var(--space-24) var(--space-28) var(--space-22); position: relative; }
-.stamp { padding: var(--space-6) var(--space-10); width: 150px; box-shadow: 4px 4px 0 var(--color-ink); }
-.stamp .big { font-size: 14px; }
 .rule { margin: var(--space-10) 0; border-top-width: var(--border-w); }
 /* Page one has to END on page one. The stacked footer, its own rule and a 24px
    display-face name pushed a signature onto an otherwise blank sheet two. The
@@ -576,11 +589,15 @@ export const scorecardRenderer: Renderer = ({ candidate, findings, score, date, 
 </head>
 <body>
 <div class="sheet-1200">
-  <div class="stamp">
-    <div class="lbl">GENERATED</div>
-    <div class="big">${dateText}</div>
-  </div>
-  <span class="chip">WHAT AI ASSISTANTS SEE</span>
+<table class="pages">
+  <thead><tr><td>
+    <div class="runner">
+      <span class="chip">WHAT AI ASSISTANTS SEE</span>
+      <span class="runner-name">${name}</span>
+      <span class="runner-date">GENERATED ${dateText}</span>
+    </div>
+  </td></tr></thead>
+  <tbody><tr><td>
   <h1>${name}</h1>
   <p class="sub">People increasingly find a local company by asking an assistant rather than scrolling a
   results page, and assistants read the code underneath your site rather than the page you see. We read yours
@@ -627,6 +644,8 @@ export const scorecardRenderer: Renderer = ({ candidate, findings, score, date, 
       ${evidenceItems.length ? evidenceItems.join('\n      ') : '<li>No evidence attached.</li>'}
     </ul>
   </div>
+  </td></tr></tbody>
+</table>
 </div>
 </body>
 </html>

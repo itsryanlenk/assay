@@ -564,6 +564,32 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
       '(note gone from the rubric table)');
   }
 
+  // --- every printed page carries the header, page one's shape --------------
+  /**
+   * The chip, the business name and the GENERATED date print at the top of
+   * EVERY page, not only the first: a page-two-only reader still knows whose
+   * document they are holding. Implemented as a repeating <thead> because
+   * Chromium repeats a table head on every printed fragment and, unlike the
+   * print-margin header API, it renders with the document's own fonts.
+   */
+  {
+    const SC = require(path.join(ROOT, 'dist/main/main/packet/render/scorecard.js'));
+    const doc = SC.scorecardRenderer({
+      candidate, findings: [confirmedFinding], score: null, date: '2026-08-04', operator,
+    }).text;
+    ok('the running header lives in a repeating table head',
+      /<thead>[\s\S]*?class="runner"[\s\S]*?<\/thead>/.test(doc), '(no runner inside a thead)');
+    const runner = (doc.match(/<div class="runner">[\s\S]*?<\/div>/) || [''])[0];
+    ok('the runner carries the chip', /WHAT AI ASSISTANTS SEE/.test(runner), runner.slice(0, 200));
+    ok('the runner names the business', /Example Boutique/.test(runner), runner.slice(0, 200));
+    ok('the runner carries the generated date', /GENERATED/.test(runner) && /4th August 2026/.test(runner),
+      runner.slice(0, 200));
+    ok('the floating stamp is gone, its job moved into the runner',
+      !/class="stamp"/.test(doc), '(old stamp still in the document)');
+    ok('the chip prints once per page head, not twice on page one',
+      (doc.match(/WHAT AI ASSISTANTS SEE/g) || []).length === 1, '(chip duplicated outside the runner)');
+  }
+
   // --- the schema kit must not publish a type it did not measure -----------
   // REGRESSION from a real packet. Places typed a heating and cooling company
   // as general_contractor, which mapped straight through to a GeneralContractor
