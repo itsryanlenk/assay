@@ -1,0 +1,61 @@
+name: Bug report
+description: Something the tool does wrong in a scan, a score, or a rendered packet.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A concrete reproduction is worth far more than a
+        description: a URL that scans wrong, or a packet that renders wrong.
+
+        **Do not report a security vulnerability here.** See `SECURITY.md` and
+        use the repository's Security tab for the private channel.
+
+        **Do not paste client data, API keys, or private business details.**
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, and what did the tool do?
+      placeholder: I scanned <site>, expected X, got Y.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction
+      description: >
+        Steps, and if it's a scan or scoring issue, the public URL involved (a
+        business's own site). Screenshots of the scorecard or packet help.
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Commit
+      description: Output of `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node version
+      description: Output of `node --version` (must be 20+).
+    validations:
+      required: true

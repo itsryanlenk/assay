@@ -1,0 +1,6 @@
+# Funnel reporters to the templates. A security issue must go through the
+# repository's Security tab (Report a vulnerability), never a public issue;
+# see SECURITY.md. The Security tab surfaces that button natively once private
+# vulnerability reporting is enabled, so no hardcoded URL is needed here (and
+# the operator handle is deliberately kept out of tracked files).
+blank_issues_enabled: false

@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest a change. Describe the problem before the solution.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This tool says no to a lot of features on purpose: no sender, no
+        auto-anything. Bulk sending, scheduled sending, auto-posting and
+        auto-approval will not land, because the whole design is built to keep
+        those a deliberate human act. A single-artifact sender is on the
+        roadmap. Please lead with the problem you're hitting, not the feature
+        you have in mind.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you actually trying to do that the tool makes hard?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: A possible solution
+      description: Optional. If you have one in mind.
+    validations:
+      required: false
+  - type: checkboxes
+    id: laws
+    attributes:
+      label: Compatibility with the five laws
+      description: See the README. Confirm your idea doesn't require breaking one.
+      options:
+        - label: This does not add an automatic sender, poster, or approver
+          required: true
+        - label: This does not let a deliverable claim something the operator didn't confirm
+          required: true

@@ -1,0 +1,49 @@
+MIT License
+
+Copyright (c) 2026 Ryan Lenk
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+THIRD-PARTY FONTS
+
+This project depends on three font packages from the @fontsource project:
+@fontsource/archivo-black, @fontsource/inter and @fontsource/jetbrains-mono.
+Those fonts are licensed under the SIL Open Font License 1.1, NOT MIT, and
+each npm package carries its own LICENSE file with the full text.
+
+The font binaries are deliberately not vendored into this repository.
+`assets/fonts/` is gitignored and populated at build time by
+`npm run build:assets`, so this repo distributes no font files and the OFL
+attribution requirement does not attach to the source tree.
+
+If you package this application for distribution, the built artifact DOES
+embed those font files, and at that point OFL-1.1 requires you to ship the
+copyright notice and license text alongside them.
+
+THIRD-PARTY MAP LIBRARY
+
+The map picker depends on the leaflet npm package, licensed BSD-2-Clause,
+NOT MIT. Like the fonts, it is not vendored: `assets/vendor/` is gitignored
+and populated at build time by `npm run build:assets`. A packaged artifact
+embeds Leaflet, and BSD-2-Clause requires its copyright notice and license
+text to ship alongside it. Map tiles come from OpenStreetMap at runtime and
+are never distributed with the application; OpenStreetMap data is © OpenStreetMap
+contributors, ODbL.

@@ -1,0 +1,13 @@
+# Normalize line endings: LF in the repository for all text files,
+# regardless of the checkout platform. This exists because a checkout with
+# core.autocrlf unset once turned into a 14,485-line no-op diff.
+* text=auto eol=lf
+
+# Binary assets, never normalized
+*.png binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary

@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--
+  The renderer makes zero network calls of its own, every outbound request is
+  main-process code. connect-src 'none' is what makes that structural instead
+  of a convention, and it held when the map landed: img-src names the tiles:
+  scheme, whose handler runs in main, validates every coordinate, and is the
+  thing that talks to openstreetmap.org. No external origin appears here.
+-->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: tiles:; connect-src 'none'; form-action 'none'; base-uri 'none';">
+<title>Assay</title>
+<link rel="stylesheet" href="../../assets/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="app-header__left">
+    <span class="chip">ASSAY</span>
+    <span class="app-header__tag mono">DRAFTS ONLY &middot; NOTHING SENDS WITHOUT YOU</span>
+  </div>
+  <nav class="app-nav">
+    <button class="btn btn--ghost is-active" data-view="scan" type="button"
+            data-tip="Find businesses and run the flaw checks against their own page source.">Scan</button>
+    <button class="btn btn--ghost" data-view="approvals" type="button"
+            data-tip="Generated packets wait here as PREPARED. Approve or reject each one; nothing sends on its own.">
+      Approvals <span class="nav-count" id="nav-approvals-count" hidden></span>
+    </button>
+    <button class="btn btn--ghost" data-view="settings" type="button"
+            data-tip="API keys, how the checks reach Claude, and who the packet says it is from.">Settings</button>
+    <button class="btn btn--ghost" data-view="help" type="button"
+            data-tip="The whole flow, the six checks, and the five laws.">Help</button>
+  </nav>
+</header>
+
+<main class="app-main">
+
+  <!-- ============================= SCAN ============================= -->
+  <section class="view" id="view-scan">
+
+    <h1>Find one business<br>with a real problem.</h1>
+    <p class="sub">
+      Candidates come from the <b>Google Places API</b>, never from scraped Maps HTML.
+      Six checks read each site's raw source and record the evidence behind every
+      finding. <b>REMOTE</b> means the app found it and you have not
+      confirmed it yet; nothing reaches a document until you do.
+    </p>
+
+    <div class="block panel" id="key-warning" hidden>
+      <span class="chip red">NO API KEY</span>
+      <h2>Discovery needs a Places key.</h2>
+      <p>
+        Add a Google Places key in <b>Settings</b>. It needs <b>Places API (New)</b>
+        enabled and billing active on the project. The key is stored on this machine
+        only, in your user data folder.
+      </p>
+    </div>
+
+    <form class="toolbar" id="scan-form" autocomplete="off">
+      <div class="field field--grow" data-tip="Town and state to search, e.g. Asheville, NC. Passed to the Places API as typed.">
+        <label for="f-city">City</label>
+        <input id="f-city" name="city" type="text" placeholder="Asheville, NC" required>
+      </div>
+      <div class="field field--grow" data-tip="The kind of business, in the words a customer would use. Broader terms return more candidates.">
+        <label for="f-category">Category</label>
+        <input id="f-category" name="category" type="text" placeholder="hvac contractor" required>
+      </div>
+      <div class="field field--narrow" data-tip="How many candidates per page. Each page is one billed Places request.">
+        <label for="f-limit">Results</label>
+        <select id="f-limit" name="limit">
+          <option value="5">5</option>
+          <option value="10" selected>10</option>
+          <option value="20">20</option>
+        </select>
+      </div>
+      <button class="btn btn--primary" id="scan-go" type="submit"
+              data-tip="Call the Places API (New) and list matching businesses. Nothing is scraped from Maps HTML.">Scan</button>
+    </form>
+
+    <div class="band" id="results-band" hidden>
+      <span class="l" id="results-title">CANDIDATES</span>
+      <button class="btn btn--ghost band-btn" id="map-toggle" type="button" hidden
+              title="Show the results on a street map. Tiles come from OpenStreetMap, fetched by the main process.">MAP</button>
+      <span class="r" id="results-note"></span>
+    </div>
+
+    <!-- The map picker. Hidden until toggled; Leaflet initializes on first
+         open, and no tile request exists before that. Pins mirror the table
+         below; checks are launched from the table only. -->
+    <div class="block panel map-panel" id="map-panel" hidden>
+      <div id="map-canvas"></div>
+      <p class="map-note" id="map-note" hidden></p>
+    </div>
+
+    <div id="scan-status"></div>
+
+    <div id="results-wrap" hidden>
+      <table class="matrix" id="results-table">
+        <thead>
+          <tr>
+            <th class="col-idx">#</th>
+            <th>Business</th>
+            <th class="col-site">Website</th>
+            <th class="col-phone">Phone</th>
+            <th class="col-rev">Reviews</th>
+            <th class="col-status">Status</th>
+            <th class="col-check">Check</th>
+          </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+      </table>
+      <div class="results-footer">
+        <button class="btn btn--ghost" id="load-more" type="button" hidden
+                data-tip="Fetch the next page of candidates for the same query. One more billed Places request.">Load more</button>
+        <div class="results-footer__notes">
+          <p class="results-footer__law mono">
+            EVERY ROW CAME FROM THE PLACES API. NO MAPS HTML WAS READ.
+          </p>
+          <p class="results-footer__billing" id="quota-detail"></p>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- =========================== APPROVALS =========================== -->
+  <!--
+    One artifact at a time, on purpose. A grid of checkboxes invites clearing a
+    row without reading it, and the whole reason this gate exists is that a
+    finished branded PDF sitting in a client folder already looks done. The
+    rail says what is waiting; the counter shows one item and asks for a
+    decision on it alone.
+  -->
+  <section class="view" id="view-approvals" hidden>
+
+    <h1>Nothing leaves<br>without you.</h1>
+    <p class="sub">
+      Generated artifacts arrive here as <b>PREPARED</b>. Preparing is not approving.
+      Approval is per item, it re-checks that every finding is still
+      operator-confirmed, and there is deliberately <b>no unapprove</b>: reversing a
+      decision leaves a record. To reverse one, reject it and say why.
+    </p>
+
+    <div id="approvals-status"></div>
+
+    <div class="counter" id="counter" hidden>
+      <aside class="counter__rail">
+        <div class="counter__railhead">
+          <span class="chip" id="rail-waiting-chip">0 WAITING</span>
+        </div>
+        <div class="counter__list" id="queue-rail"></div>
+      </aside>
+      <div class="counter__pane" id="queue-detail"></div>
+    </div>
+
+  </section>
+
+  <!-- =========================== SETTINGS =========================== -->
+  <section class="view" id="view-settings" hidden>
+
+    <h1>Settings</h1>
+    <p class="sub">
+      Keys are written to <span class="q" id="cfg-path">…</span> on this machine and
+      never leave it. An exported environment variable works too, and is shown as
+      the source when that is where a key came from.
+    </p>
+
+    <div id="settings-status"></div>
+
+    <div class="block panel">
+      <span class="chip">KEYS</span>
+      <h2>API keys</h2>
+      <div id="keys-list" class="keys-list"></div>
+    </div>
+
+    <div class="block panel">
+      <span class="chip">AGENT AUTH</span>
+      <h2>How the flaw checks talk to Claude.</h2>
+      <p>
+        <b>Auto</b> resolves to the <span class="q">claude</span> CLI, so the work draws
+        on your Pro/Max plan rather than metered API spend. It is the only path this
+        build implements: there is no API-key fallback, and Settings refuses to store
+        an Anthropic key because nothing would read it. Subscription auth for the Agent
+        SDK itself was marked <b>paused</b> by Anthropic as of 7/28/26.
+        Use <b>Test connection</b> below to check the resolved provider before running
+        checks against real candidates.
+      </p>
+      <div class="field field--narrow" data-tip="How headlines get reworded. The model never changes a score, count, or fix; only the wording.">
+        <label for="f-agent-mode">Mode</label>
+        <select id="f-agent-mode">
+          <option value="auto">Auto (resolves to the CLI)</option>
+          <option value="cli">CLI only</option>
+          <option value="sdk-apikey">Agent SDK + API key</option>
+          <option value="sdk-subscription">Agent SDK + subscription (paused upstream)</option>
+        </select>
+      </div>
+      <div class="agent-probe">
+        <button class="btn btn--ghost" id="agent-probe-go" type="button"
+                data-tip="Resolve and probe the provider this mode would use, without spending a scan.">Test connection</button>
+        <span class="spinner" id="agent-probe-spinner" hidden></span>
+      </div>
+      <div id="agent-probe-result"></div>
+    </div>
+
+    <div class="block panel">
+      <span class="chip">YOUR DETAILS</span>
+      <h2>Who the packet is from.</h2>
+      <p>
+        Printed in the footer of every artifact that reaches a prospect. Not secret,
+        so unlike the keys above these are stored in full and shown back to you.
+        <b>Name and email are required to generate anything</b>, because a document
+        that reaches a business has to say who sent it and how to reply.
+      </p>
+      <div class="field" data-tip="Printed in every artifact footer as the sender. Required to generate anything.">
+        <label for="f-op-name">Your name or business name</label>
+        <input id="f-op-name" type="text" placeholder="Jane Smith" autocomplete="off">
+      </div>
+      <div class="field" data-tip="Where a prospect replies. Required, and printed on every deliverable.">
+        <label for="f-op-email">Reply-to email</label>
+        <input id="f-op-email" type="text" placeholder="jane@example.com" autocomplete="off">
+      </div>
+      <div class="field" data-tip="Optional. If you host the scanner, where a prospect can re-run their own scan.">
+        <label for="f-op-scanner">Scanner URL (optional)</label>
+        <input id="f-op-scanner" type="text" placeholder="https://example.com/scan" autocomplete="off">
+      </div>
+      <div class="field"
+           data-tip="Voice instructions for the model that rewords findings into owner-facing sentences. Tone and word choice: it cannot change a severity, a fix, or any recorded fact, a sentence inventing a number is refused at generation, and every sentence passes the validator before it prints.">
+        <label for="f-op-voice">Brand voice (optional)</label>
+        <textarea id="f-op-voice" rows="4" maxlength="1500"
+                  placeholder="e.g. Write the way my site does: short sentences, plain words, no exclamation marks. Say &quot;we&quot; not &quot;I&quot;."></textarea>
+      </div>
+      <button class="btn btn--primary" id="op-save" type="button"
+              data-tip="Save these details on this machine. They are not secret and are shown back to you.">Save details</button>
+    </div>
+
+    <div class="block panel">
+      <span class="chip">BRAND ON DOCUMENTS</span>
+      <h2>Your colour and your logo</h2>
+      <p>
+        The scorecard keeps its layout and its severity colours; your accent replaces
+        the highlight, and your logo sits above the closing block. Severity shading stays
+        on the house scale on purpose, so a serious finding still looks serious.
+      </p>
+      <div class="field" data-tip="Six-digit hex, like #2E5AAC. Highlight surfaces only. The app picks the better of black or white text against it, which clears 4.34:1 at worst, so a very mid-toned colour is slightly under the AA target for small text.">
+        <label for="f-brand-accent">Accent colour</label>
+        <input id="f-brand-accent" type="text" placeholder="#2E5AAC" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="brand-logo-row">
+        <button class="btn btn--ghost" id="brand-logo-choose" type="button"
+                data-tip="PNG or JPEG, under 512KB. A copy is stored in your data folder, so moving the original later does not break your documents.">Choose logo…</button>
+        <button class="btn btn--ghost" id="brand-logo-clear" type="button"
+                data-tip="Removes the logo from future documents and deletes the stored copy.">Clear logo</button>
+        <span class="brand-logo-state" id="brand-logo-state">No logo set</span>
+      </div>
+      <button class="btn btn--primary" id="brand-save" type="button"
+              data-tip="Saves the accent colour. The logo saves as soon as you choose it.">Save accent</button>
+    </div>
+
+    <div class="block panel">
+      <span class="chip">ENVIRONMENT</span>
+      <h2>This build</h2>
+      <table class="matrix" id="env-table"><tbody></tbody></table>
+    </div>
+
+  </section>
+
+  <!-- ============================= HELP ============================= -->
+  <section class="view" id="view-help" hidden>
+
+    <h1>How it works.</h1>
+    <p class="sub">
+      Assay finds one local business, checks its own page source, and drafts an
+      outreach packet. <b>It never sends anything.</b> The whole design exists to make one
+      promise true: every claim in a deliverable can be reproduced by the recipient with
+      Ctrl+U. Reach this page any time from <b>Help</b> in the menu bar or the nav above.
+    </p>
+
+    <div class="block panel">
+      <span class="chip">THE FLOW</span>
+      <h2>Five steps, in order.</h2>
+      <ul class="flat">
+        <li><b>1 · Find.</b> On <b>Scan</b>, enter a city and a category and pull candidates from
+          the Google Places API. Every row is Places data; no Maps HTML is scraped.</li>
+        <li><b>2 · Check.</b> Press <b>Check</b> on a candidate to run the six flaw checks against
+          its own fetched page source. Findings come back <b>REMOTE</b>: real, logged, and not
+          yet safe to send.</li>
+        <li><b>3 · Confirm.</b> Press <b>Confirm</b>, open each named document, press Ctrl+U, and
+          paste the source. The same checks re-run against your bytes, and a finding becomes
+          <b>CONFIRMED</b> or <b>DIVERGED</b>.</li>
+        <li><b>4 · Generate.</b> Once the packet is releasable, <b>Generate the packet</b> writes
+          the scorecard, schema kit and drafts and records every one as <b>PREPARED</b>.</li>
+        <li><b>5 · Approve.</b> In <b>Approvals</b>, clear each artifact one at a time. Approval is
+          per item and re-checks the confirmation. There is no unapprove; reject with a reason
+          instead.</li>
+      </ul>
+    </div>
+
+    <div class="block panel">
+      <span class="chip">THE SIX CHECKS</span>
+      <h2>What each one looks at.</h2>
+      <ul class="flat">
+        <li><b>Website.</b> Does the listed site load, and is it really theirs.</li>
+        <li><b>Crawl and index.</b> robots.txt, canonical tags, and whether a sitemap resolves to
+          real pages.</li>
+        <li><b>AI readiness.</b> The 105-point instrument: crawler access, llms.txt, entity schema,
+          FAQPage, product and offer schema, and plain-words vocabulary.</li>
+        <li><b>Freshness.</b> How recently the content and its machine-readable dates were updated.</li>
+        <li><b>Booking path.</b> Whether a customer can actually book or reach the business from the
+          page.</li>
+        <li><b>NAP consistency.</b> Name, address and phone agreeing across the site and the
+          listing.</li>
+      </ul>
+      <p>Ranking takes the single worst finding, never an average: outreach leads with one problem
+        too good to sit on.</p>
+    </div>
+
+    <div class="block panel">
+      <span class="chip">CONFIRMATION</span>
+      <h2>Why REMOTE is not enough.</h2>
+      <p>What this app's crawler receives is routinely not what you see in Ctrl+U: bot challenges,
+        consent walls, CDN and geo variance. Because the pitch rests on the prospect reproducing
+        every claim, a claim only the crawler saw is worse than no claim at all.</p>
+      <ul class="flat">
+        <li><b>REMOTE.</b> Crawler-only. Real and logged, but nothing can be generated or sent from
+          it.</li>
+        <li><b>CONFIRMED.</b> Your own view-source reproduces the finding. Safe to use.</li>
+        <li><b>DIVERGED.</b> Your source contradicts the crawl. The original claim is void, and a
+          site that answers crawlers differently than browsers is itself worth raising.</li>
+      </ul>
+      <p>Confirmations expire 72 hours after they are made and do not survive a restart, on purpose:
+        a stale confirmation must never look live.</p>
+    </div>
+
+    <div class="block panel">
+      <span class="chip">THE VIEWS</span>
+      <h2>What each screen is for.</h2>
+      <ul class="flat">
+        <li><b>Scan.</b> Search, then a table of candidates. <b>MAP</b> plots the ones that carry
+          coordinates, so you can see what is clustered downtown and what is out on a rural road.
+          It costs no extra API: the coordinates come with the search you already paid for. Street
+          tiles are fetched by the app itself from OpenStreetMap, and only once you open the map.
+          A pin's <b>SELECT IN TABLE</b> jumps to its row; checks are still launched from the
+          table.</li>
+        <li><b>Approvals.</b> Everything generated, per artifact. <b>ARCHIVE</b> files a finished
+          prospect's decided items into a collapsed section, which is a view setting and nothing
+          more: the ledger is untouched, RESTORE brings them back, anything still waiting on you is
+          never filed away, and new work for that prospect un-files it.</li>
+        <li><b>Settings.</b> Your Places key, how headlines get reworded, the details printed on
+          every artifact, and the optional brand voice, accent colour and logo.</li>
+      </ul>
+    </div>
+
+    <div class="block panel" id="help-laws">
+      <span class="chip">THE FIVE LAWS</span>
+      <h2>Not comments. Enforced in code.</h2>
+      <ul class="flat">
+        <li><b>1.</b> AI-summarised page content is never evidence. Raw source only.</li>
+        <li><b>2.</b> Never fabricate a review, testimonial or result. The guardrail sweep refuses
+          rather than repairs.</li>
+        <li><b>3.</b> Nothing auto-sends, auto-posts or auto-prints. Approval is per item.</li>
+        <li><b>4.</b> Every score prints its instrument and its base.</li>
+        <li><b>5.</b> Discovery is the Places API plus the business's own site, nothing else.</li>
+      </ul>
+    </div>
+
+    <div class="block panel">
+      <span class="chip">SETTINGS</span>
+      <h2>What to set up first.</h2>
+      <ul class="flat">
+        <li><b>Google Places key.</b> Needs Places API (New) with billing on. The only key this
+          build reads, stored on this machine only.</li>
+        <li><b>Agent auth.</b> How headlines get reworded. Auto resolves to the
+          <span class="q">claude</span> CLI, the only path this build implements. The model cannot
+          change a score, count, hash or fix.</li>
+        <li><b>Your details.</b> Name and email are printed on every artifact and are required to
+          generate anything. Brand voice, if you set one, steers how findings are worded.</li>
+        <li><b>Brand on documents.</b> Optional. An accent colour and a logo for the scorecard.
+          Severity colours stay on the house scale, so a serious finding still reads as one.</li>
+      </ul>
+    </div>
+
+    <div class="block panel">
+      <span class="chip">GOOD TO KNOW</span>
+      <h2>Limitations.</h2>
+      <ul class="flat">
+        <li>There is no sender in this build. The map in the scan view fetches
+          street tiles from OpenStreetMap through the main process, and only
+          after you open it.</li>
+        <li>Page discovery is best-effort; a site that hides pages behind JavaScript may read as one
+          page, and the score is refused rather than guessed.</li>
+        <li>Confirmation covers homepage, robots.txt, llms.txt and sitemap.xml, plus a paste slot
+          for each extra page a site-wide score was read from.</li>
+        <li>Everything the app keeps goes to one <span class="q">data</span> folder next to the
+          install. Rendering a PDF writes one temporary file to the system temp folder and deletes
+          it afterwards.</li>
+      </ul>
+    </div>
+
+  </section>
+
+</main>
+
+<footer class="app-footer">
+  <span class="mono">ASSAY v<span id="app-version">…</span></span>
+  <span class="mono">6 OF 6 CHECKS LIVE &middot; ALL FINDINGS REMOTE UNTIL YOU CONFIRM &middot; NOTHING SENDS</span>
+</footer>
+
+<script src="../../assets/vendor/leaflet/leaflet.js"></script>
+<script src="js/map-core.js"></script>
+<script src="js/archive-core.js"></script>
+<script src="js/map.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

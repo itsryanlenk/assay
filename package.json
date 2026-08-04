@@ -1,0 +1,43 @@
+{
+  "name": "assay",
+  "version": "0.1.0",
+  "description": "Local-first outreach scanner. Finds one local business with a specific, verifiable weakness and drafts (never auto-sends) an outreach packet.",
+  "license": "MIT",
+  "author": "Ryan Lenk",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "dist/main/main/main.js",
+  "scripts": {
+    "clean": "node scripts/clean.js",
+    "build:main": "tsc -p tsconfig.json",
+    "build:assets": "node scripts/copy-assets.js",
+    "build": "npm run build:main && npm run build:assets",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron . --dev",
+    "smoke": "npm run build && electron . --smoke",
+    "test:ipc": "npm run build && electron scripts/test-ipc.js",
+    "test": "npm run preflight && npm run smoke && npm run test:ipc && npm run test:parsers && npm run test:instrument && npm run test:confirm && npm run test:packet && npm run test:approve",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "preview": "npm run build && electron scripts/preview.js",
+    "test:parsers": "npm run build:main && node scripts/test-parsers.js",
+    "test:instrument": "npm run build:main && node scripts/test-instrument.js",
+    "test:confirm": "npm run build:main && node scripts/test-confirmation.js",
+    "test:packet": "npm run build:main && node scripts/test-packet.js",
+    "preflight": "node scripts/preflight.js",
+    "test:approve": "npm run build:main && node scripts/test-approval.js"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "electron": "^43.2.0",
+    "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@fontsource/archivo-black": "^5.1.0",
+    "@fontsource/inter": "^5.1.0",
+    "@fontsource/jetbrains-mono": "^5.1.1",
+    "leaflet": "1.9.4",
+    "undici": "^7.24.4"
+  }
+}
