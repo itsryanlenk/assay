@@ -1154,11 +1154,14 @@ function renderKeys(cfg) {
 }
 
 function applyOperator(cfg) {
-  const op = (cfg && cfg.operator) || { name: '', email: '', scannerUrl: '', brandVoice: '' };
+  const op = (cfg && cfg.operator) || { name: '', email: '', scannerUrl: '', askMode: 'default', ask: '', brandVoice: '' };
   $('#f-op-name').value = op.name || '';
   $('#f-op-email').value = op.email || '';
   $('#f-op-scanner').value = op.scannerUrl || '';
   $('#f-op-voice').value = op.brandVoice || '';
+  $('#f-op-ask-mode').value = op.askMode === 'custom' ? 'custom' : 'default';
+  $('#f-op-ask').value = op.ask || '';
+  syncAskField();
   // Deliberately does NOT touch the brand fields. It used to, and saving your
   // details then re-rendered the accent box from stored config, silently
   // throwing away a colour you had typed but not yet saved. That is what
@@ -1225,6 +1228,11 @@ async function clearLogo() {
   applyLogoState(res.data);
 }
 
+/** The custom-ask box only takes typing when My own words is selected. */
+function syncAskField() {
+  $('#f-op-ask').disabled = $('#f-op-ask-mode').value !== 'custom';
+}
+
 async function saveOperator() {
   const btn = $('#op-save');
   btn.disabled = true;
@@ -1235,6 +1243,8 @@ async function saveOperator() {
       email: $('#f-op-email').value,
       scannerUrl: $('#f-op-scanner').value,
       brandVoice: $('#f-op-voice').value,
+      askMode: $('#f-op-ask-mode').value,
+      ask: $('#f-op-ask').value,
     });
   } catch (e) {
     res = {
@@ -2007,6 +2017,7 @@ async function boot() {
   });
 
   $('#agent-probe-go').addEventListener('click', () => void runAgentProbe());
+  $('#f-op-ask-mode').addEventListener('change', syncAskField);
   $('#op-save').addEventListener('click', () => void saveOperator());
   $('#brand-save').addEventListener('click', () => void saveAccent());
   $('#brand-logo-choose').addEventListener('click', () => void chooseLogo());

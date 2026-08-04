@@ -681,6 +681,133 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
       /"streetAddress": "170 Harbor Rd"/.test(cleanKit), 'no streetAddress in the @graph');
   }
 
+  // --- the closing ask: the house pitch, the operator's words, or nothing ---
+  /**
+   * The scorecard's closing ask is now an operator setting. askMode 'default'
+   * (and every operator object persisted before the field existed) prints the
+   * house pitch, unchanged. askMode 'custom' prints the operator's verbiage
+   * word for word, and a blank custom ask prints nothing at all. The
+   * signature closes the page in every mode.
+   */
+  {
+    const SC = require(path.join(ROOT, 'dist/main/main/packet/render/scorecard.js'));
+    const render = (op) => SC.scorecardRenderer({
+      candidate, findings: [confirmedFinding], score: null, date: '2026-08-04', operator: op,
+    }).text;
+
+    const houseAsk = render({ ...operator, askMode: 'default', ask: 'Typed but not selected.' });
+    ok('default mode prints the house pitch',
+      /Is this worth paying to fix\?/.test(houseAsk) && /throw this away/.test(houseAsk),
+      '(house ask copy missing)');
+    ok('default mode never prints the custom text',
+      !/Typed but not selected/.test(houseAsk), '(custom text printed in default mode)');
+
+    const legacy = render(operator);
+    ok('an operator object predating the field prints the house pitch',
+      /Is this worth paying to fix\?/.test(legacy), '(legacy operator lost the ask)');
+
+    const custom = render({ ...operator, askMode: 'custom', ask: 'If this scan reads useful, reply to this email and we will walk your site together.' });
+    ok('a custom ask prints word for word',
+      /reply to this email and we will walk your site together/.test(custom), '(custom ask missing)');
+    ok('the house pitch never prints beside a custom ask',
+      !/Is this worth paying to fix\?/.test(custom) && !/throw this away/.test(custom),
+      '(house ask copy found)');
+
+    const blankCustom = render({ ...operator, askMode: 'custom', ask: '   ' });
+    ok('a blank custom ask leaves no ask copy on the page',
+      !/Is this worth paying to fix\?/.test(blankCustom) && !/throw this away/.test(blankCustom),
+      '(ask copy found)');
+    ok('the signature still prints when the ask is blank',
+      blankCustom.includes('hello@example.test') && /Operator/.test(blankCustom), '(signature missing)');
+
+    const hostile = render({ ...operator, askMode: 'custom', ask: '<script>alert(1)</script> Reply & we talk.' });
+    ok('operator ask text is escaped, never markup',
+      !/<script>alert\(1\)/.test(hostile) && /&lt;script&gt;/.test(hostile),
+      '(raw markup reached the document)');
+
+    const multi = render({ ...operator, askMode: 'custom', ask: 'First thought.\n\nSecond thought.' });
+    ok('a blank line in the ask starts a new paragraph',
+      /<p>First thought\.<\/p>/.test(multi) && /<p>Second thought\.<\/p>/.test(multi),
+      multi.slice(Math.max(0, multi.indexOf('First') - 80), multi.indexOf('First') + 120));
+  }
+
+  // --- the ask passes a STRICTER wall than the document sweep ---------------
+  /**
+   * The general sweep is calibrated for house- and check-written copy: its
+   * digit rule needs word boundaries and exempts structural figures, so
+   * "worth about 40k", "3x the calls" and a number split by a zero-width
+   * character all walked through it onto a client PDF, under the operator's
+   * own signature. Killed by the release-day adversary pass. The ask channel
+   * therefore takes no digits at all and no invisible characters; a figure
+   * belongs to a finding the reader can reproduce.
+   *
+   * Each case uses its own outputRoot: a regression that GENERATES instead
+   * of refusing must fail an assertion here, not supersede the shared ledger
+   * and crash a later approval test, which is what the first red step did.
+   */
+  {
+    const SC = require(path.join(ROOT, 'dist/main/main/packet/render/scorecard.js'));
+    let askRootN = 0;
+    const tryAsk = async (ask) => {
+      const root = path.join(os.tmpdir(), `packet-ask-${process.pid}-${askRootN++}`);
+      try {
+        const res = await G.generatePacket(
+          {
+            ...base, outputRoot: root, findings: [confirmedFinding], confirmedAt: new Date().toISOString(),
+            operator: { ...operator, askMode: 'custom', ask },
+          },
+          [SC.scorecardRenderer]
+        );
+        return { res, root };
+      } catch (e) {
+        return { err: e, root };
+      }
+    };
+
+    const pct = await tryAsk('Most owners see 40% more calls after this.');
+    ok('an ask that invents a percentage refuses to generate',
+      pct.err && pct.err.name === 'GuardrailError', `got ${pct.err && pct.err.name}`);
+    ok('the refused ask packet left nothing behind',
+      !fs.existsSync(path.join(pct.root, 'clients')), 'clients/ exists after a refused ask');
+
+    const glued = await tryAsk('Fixing this is worth about 40k a year to a shop your size.');
+    ok('a digit run glued to a letter refuses too',
+      glued.err && glued.err.name === 'GuardrailError', `got ${glued.err && glued.err.name}`);
+
+    const mult = await tryAsk('Shops that fix this get 3x the calls within a season.');
+    ok('a bare multiplier refuses too',
+      mult.err && mult.err.name === 'GuardrailError', `got ${mult.err && mult.err.name}`);
+
+    const zw = await tryAsk('You are losing 4​5 calls a month.');
+    ok('a zero-width character cannot smuggle a number past the wall',
+      zw.err && zw.err.name === 'GuardrailError', `got ${zw.err && zw.err.name}`);
+
+    const zwOnly = await tryAsk('Reply​ soon and we will talk.');
+    ok('an invisible character refuses even with no digits near it',
+      zwOnly.err && zwOnly.err.name === 'GuardrailError', `got ${zwOnly.err && zwOnly.err.name}`);
+
+    const clean = await tryAsk('No figures in this one, just a plain offer to talk it through.');
+    ok('a digit-free ask still generates',
+      clean.res && clean.res.artifacts.length === 1,
+      clean.err ? `refused: ${clean.err.message}` : 'no artifacts');
+
+    // The house pitch is not the operator's prose and keeps its own path: a
+    // default-mode packet still generates with the ask wall in place.
+    const house = await (async () => {
+      const root = path.join(os.tmpdir(), `packet-ask-${process.pid}-${askRootN++}`);
+      try {
+        return { res: await G.generatePacket(
+          { ...base, outputRoot: root, findings: [confirmedFinding], confirmedAt: new Date().toISOString(),
+            operator: { ...operator, askMode: 'default', ask: '4​5 stored but not selected' } },
+          [SC.scorecardRenderer]
+        ) };
+      } catch (e) { return { err: e }; }
+    })();
+    ok('default mode is untouched by the stored custom text',
+      house.res && house.res.artifacts.length === 1,
+      house.err ? `refused: ${house.err.message}` : 'no artifacts');
+  }
+
   // --- an evidence hash that happens to be all digits ----------------------
   // REGRESSION from a real run. The scorecard prints the first characters of
   // each capture's sha256 so a reader can confirm they are looking at the same

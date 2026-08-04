@@ -27,7 +27,7 @@ import { releasable } from '../confirmation/gate';
 import { scoreSentence } from '../scoring/instrument';
 import { QueueItem, loadQueue, prepare } from '../approval/gate';
 import { BrandContext } from './brand';
-import { assertClean, AllowedFacts } from './guardrails';
+import { assertClean, AllowedFacts, GuardrailError, sweepAsk } from './guardrails';
 import {
   ArtifactKind,
   FREE_TIER,
@@ -52,8 +52,16 @@ export type GenerateRequest = {
   confirmedAt: string | null;
   outputRoot: string;
   contactName?: string | null;
-  /** Operator's own contact line, printed in the artifact footers. */
-  operator: { name: string; email: string; scannerUrl: string };
+  /**
+   * Operator's own contact line, printed in the artifact footers.
+   *
+   * `askMode` picks the scorecard's closing ask: the house pitch ('default')
+   * or the operator's own `ask` text ('custom', where blank prints no ask at
+   * all). Both optional because operator objects persisted before the fields
+   * existed have neither; absent reads as 'default', which is what every
+   * packet printed before the setting existed.
+   */
+  operator: { name: string; email: string; scannerUrl: string; askMode?: 'default' | 'custom'; ask?: string };
   /** Derived in main from config; null when nothing is branded. */
   brand?: BrandContext | null;
 };
@@ -193,6 +201,14 @@ export async function generatePacket(
   // WALL 1. Same function the approval gate calls, so the two cannot disagree.
   const verdict = releasable(req.findings, req.confirmedAt);
   if (!verdict.ok) throw new NotReleasableError(verdict.reason);
+
+  // The operator's closing ask is verbatim prose bound for a client document,
+  // so it passes a stricter wall than the rendered sweep; see sweepAsk. The
+  // house pitch is reviewed source, not operator input, and takes its own path.
+  if (req.operator.askMode === 'custom') {
+    const askViolations = sweepAsk(req.operator.ask ?? '');
+    if (askViolations.length) throw new GuardrailError('Scorecard closing ask', askViolations);
+  }
 
   /**
    * Read the approval ledger before anything is written.

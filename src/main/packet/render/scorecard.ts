@@ -370,6 +370,8 @@ ul.flat li::before { content: ""; position: absolute; left: 0; top: var(--space-
    line, which is the whole of what a reader needs from the bottom of a page. */
 .ask .sign { margin-top: var(--space-10); font-size: 12.5px; border-top: var(--border-thin); padding-top: var(--space-8); }
 .ask .sign b { font-family: var(--font-display); font-size: 14px; letter-spacing: var(--tracking-wide); }
+/* With no ask copy above it, the divider has nothing to divide. */
+.ask .sign--bare { border-top: none; margin-top: 0; padding-top: 0; }
 .verify-line { font-size: 11.5px; line-height: 1.45; color: var(--color-muted); margin-top: var(--space-6); }
 
 /* The evidence grid. Dense on purpose: this is a receipt, not a section
@@ -407,6 +409,21 @@ ul.evidence li .ev-meta { flex: 0 0 auto; color: var(--color-muted); white-space
 /* Page one is the owner's. Everything after it is for whoever maintains the
    site, and it starts on a fresh sheet so the split is obvious. */
 .tech-start { break-before: page; page-break-before: always; }
+
+/* PRINT INTEGRITY. A unit that will not fit the rest of a page moves to the
+   next page whole; nothing self-contained is ever cut in half across a sheet
+   boundary. Half a finding on one page reads as carelessness on a document
+   whose pitch is precision. avoid is a hint the engine drops for a unit
+   taller than one page, so the ask is bounded twice (ASK_MAX characters in
+   config/store.ts, six paragraphs in the renderer) to stay below that line.
+   The stamp is absolutely positioned and never fragments; it needs no rule. */
+.block, .ask, .scoreband { break-inside: avoid; page-break-inside: avoid; }
+table.matrix tr { break-inside: avoid; page-break-inside: avoid; }
+/* The column headers repeat when the rubric table crosses a page. */
+table.matrix thead { display: table-header-group; }
+/* A band is a heading. It keeps its first content; it is never the last
+   thing on a page. */
+.band { break-inside: avoid; page-break-inside: avoid; break-after: avoid; page-break-after: avoid; }
 
 .ask { border: var(--border); background: var(--accent-bg); color: var(--accent-bg-text); padding: var(--space-10) var(--space-14); margin: var(--space-10) 0; box-shadow: 5px 5px 0 var(--color-ink); }
 .ask .logo { display: block; max-height: 40px; max-width: 220px; margin-bottom: var(--space-8); }
@@ -486,6 +503,46 @@ export const scorecardRenderer: Renderer = ({ candidate, findings, score, date, 
     ? flaws.map(findingBlock).join('\n')
     : '<div class="block"><p>No confirmed flaw is attached to this packet.</p></div>';
 
+  /**
+   * The closing ask: the house pitch, the operator's own words, or nothing.
+   *
+   * askMode 'default' (and every operator object persisted before the field
+   * existed) prints the house pitch below, unchanged. 'custom' prints the
+   * operator's Settings text word for word, and blank custom text prints no
+   * ask at all: the document closes with the signature alone, and nothing
+   * stock is substituted behind the operator's back. Custom text is escaped
+   * like every other operator-typed string and swept by the same guardrails
+   * as the rest of the document, so an ask that invents a number refuses to
+   * generate rather than printing. Blank lines start a new paragraph; single
+   * line breaks are wrapping, not structure.
+   */
+  const HOUSE_ASK = `<h2>Is this worth paying to fix?</h2>
+    <p>We are not going to put a dollar figure on it. We did not look at your books, so any number here
+    would be one we made up, and you have had enough of those emails. Here is the arithmetic instead, and
+    you already have both numbers:</p>
+    <ul>
+      <li>What is one new customer worth to you over a year?</li>
+      <li>How many people would have to reach you this way, instead of somebody else, before that pays for
+      the work?</li>
+    </ul>
+    <p>If the second number is small, this is worth doing. If it is not, throw this away. That is the whole
+    pitch.</p>`;
+  // Six paragraphs at most. The config cap bounds characters, not height,
+  // and a hand-built request full of blank lines would otherwise mint a box
+  // taller than a page, which is the one shape break-inside: avoid cannot
+  // keep whole. Together the two caps are what make the no-split rule hold.
+  const customAsk = (operator.ask ?? '').trim();
+  const askBody =
+    operator.askMode === 'custom'
+      ? customAsk
+          .split(/\n\s*\n/)
+          .map((p) => escapeHtml(p.replace(/\s*\n\s*/g, ' ').trim()))
+          .filter(Boolean)
+          .slice(0, 6)
+          .map((p) => `<p>${p}</p>`)
+          .join('\n    ')
+      : HOUSE_ASK;
+
   const seen = new Set<string>();
   const allRefs: EvidenceRef[] = [];
   for (const f of flaws) {
@@ -544,18 +601,7 @@ export const scorecardRenderer: Renderer = ({ candidate, findings, score, date, 
   ${ownerBlocks || '<div class="block"><p>No scored checks are attached to this scan.</p></div>'}
 
   <div class="ask">
-    ${brandLogo}<h2>Is this worth paying to fix?</h2>
-    <p>We are not going to put a dollar figure on it. We did not look at your books, so any number here
-    would be one we made up, and you have had enough of those emails. Here is the arithmetic instead, and
-    you already have both numbers:</p>
-    <ul>
-      <li>What is one new customer worth to you over a year?</li>
-      <li>How many people would have to reach you this way, instead of somebody else, before that pays for
-      the work?</li>
-    </ul>
-    <p>If the second number is small, this is worth doing. If it is not, throw this away. That is the whole
-    pitch.</p>
-    <p class="sign"><b>${escapeHtml(operator.name)}</b> &middot; <span class="mono">${escapeHtml(operator.email)}</span>${
+    ${brandLogo}${askBody ? `${askBody}\n    ` : ''}<p class="sign${askBody ? '' : ' sign--bare'}"><b>${escapeHtml(operator.name)}</b> &middot; <span class="mono">${escapeHtml(operator.email)}</span>${
       operator.scannerUrl ? ` &middot; <span class="mono">${escapeHtml(operator.scannerUrl)}</span>` : ''
     }</p>
   </div>

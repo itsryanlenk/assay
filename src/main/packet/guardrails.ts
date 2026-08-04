@@ -138,6 +138,50 @@ export function sweep(text: string, allowed: AllowedFacts = { numbers: [] }): Gu
   return out;
 }
 
+/**
+ * The stricter wall the operator's closing ask passes, on top of the document
+ * sweep the rendered page still goes through.
+ *
+ * The ask is verbatim operator prose landing on a client document, and the
+ * general sweep above is calibrated for house- and check-written copy: its
+ * digit rule needs word boundaries and exempts structural figures, so "worth
+ * about 40k", "$12k a year" and "3x the calls" all walked through it, and a
+ * zero-width character glued inside a number split it into exempt single
+ * digits while the page still showed the number whole. Both shapes were
+ * reproduced end to end by the release-day adversary pass.
+ *
+ * Two rules, absolute for this one channel:
+ *   - No digits. A measured figure belongs to a finding, where the reader
+ *     can reproduce it; a figure in the ask is a claim with nothing behind
+ *     it. Spell numbers out.
+ *   - No invisible or direction-control characters. In pasted prose they
+ *     exist for one reason: to make the page show something a scanner never
+ *     saw.
+ */
+export function sweepAsk(text: string): GuardrailViolation[] {
+  const out: GuardrailViolation[] = [];
+  const digit = /[0-9]/.exec(text);
+  if (digit) {
+    out.push({
+      rule: 'digit in the ask',
+      found: digit[0],
+      why: 'The closing ask takes no digits. A figure belongs to a finding the reader can reproduce; spell numbers out here.',
+    });
+  }
+  // Escapes, not literal characters: a rule that bans the invisible must not
+  // itself carry anything a reader cannot see.
+  const invisible =
+    /[\u00AD\u061C\u180E\u200B-\u200F\u2028-\u202E\u2060-\u2064\u206A-\u206F\uFEFF]/.exec(text);
+  if (invisible) {
+    out.push({
+      rule: 'invisible character in the ask',
+      found: `U+${(invisible[0].codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, '0')}`,
+      why: 'Invisible and direction-control characters can make the page show a claim the sweep never saw.',
+    });
+  }
+  return out;
+}
+
 export class GuardrailError extends Error {
   constructor(
     readonly artifact: string,

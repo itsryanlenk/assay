@@ -25,9 +25,24 @@ const LEAKS = require('./leak-patterns.js');
 const scrub = LEAKS.scrubTermsState(ROOT);
 const terms = scrub.terms;
 
+/**
+ * -z and quotepath=false, everywhere a path leaves git. With the default
+ * quoting, a non-ASCII filename comes back octal-escaped inside double
+ * quotes: readFileSync then throws on the mangled path (silently skipping
+ * the file's content scan), and the trailing quote defeats every
+ * extension-anchored check. A screenshot named after a business, saved from
+ * a Mac (NFD names), was the adversary's reproduced escape. NUL-separated
+ * output has no quoting at all.
+ */
+function gitPaths(args) {
+  return execSync(`git -c core.quotepath=false ${args} -z`, { cwd: ROOT, encoding: 'utf8' })
+    .split('\0')
+    .filter(Boolean);
+}
+
 let files;
 try {
-  files = execSync('git ls-files', { cwd: ROOT, encoding: 'utf8' }).split('\n').filter(Boolean);
+  files = gitPaths('ls-files');
 } catch {
   console.log('\n--- PREFLIGHT ---\n\n  SKIPPED, not a git checkout so there is no publish set to inspect.\n');
   process.exit(0);
@@ -63,12 +78,51 @@ const scrubMissing = !scrub.present;
  */
 let trackedData = [];
 try {
-  trackedData = execSync('git ls-files -- data', { cwd: ROOT, encoding: 'utf8' })
-    .split('\n')
-    .filter(Boolean);
+  trackedData = gitPaths('ls-files -- data');
 } catch {
   trackedData = [];
 }
+
+/**
+ * GATE 3. Every business data/ knows about must be covered by the term list.
+ *
+ * Both leaks that forced the history rebuild were details of businesses this
+ * app itself had scanned, and the rule that would have caught them
+ * ("anything the app scans goes in .scrub-terms the same day") lived in
+ * memory. This reads the approval ledger and the client folders and refuses
+ * the build for any scanned name the term list has never heard of. Skipped
+ * when the term list itself is missing: GATE 1 already fails that run, and
+ * coverage against an empty list would just name every client twice.
+ */
+/**
+ * BOTH roots the app can be using. data-root.ts honours ASSAY_DATA_DIR
+ * before the install-dir default, so a gate that only read ROOT/data passed
+ * vacuously for an operator running with the override set: zero names
+ * harvested, zero uncovered, PASS having examined nothing, the exact
+ * reported-success-while-doing-nothing failure GATE 1 exists to kill.
+ * Harvesting the union also keeps old scans in the retired root covered.
+ */
+const COV = require('./scrub-coverage.js');
+const dataRoots = [process.env.ASSAY_DATA_DIR, path.join(ROOT, 'data')].filter(Boolean);
+const scannedNames = [...new Set(dataRoots.flatMap((r) => COV.harvestScannedNames(r)))];
+const uncovered = scrub.present ? COV.missingCoverage(scannedNames, terms) : [];
+
+/**
+ * GATE 4. A tracked binary must be allowlisted by name.
+ *
+ * Every scan in this repo reads text. A tracked image is published
+ * unexamined, and pixels carry a business's name and phone number as well as
+ * bytes do; a screenshot is exactly how that happens. `.binary-allow` is
+ * tracked and holds one repo path per line, so a binary entering the publish
+ * set is always a deliberate, reviewed act rather than a quiet `git add -A`.
+ */
+let allowLines = [];
+try {
+  allowLines = fs.readFileSync(path.join(ROOT, '.binary-allow'), 'utf8').split('\n');
+} catch {
+  /* no allowlist file means nothing is allowed */
+}
+const unallowed = COV.nonTextFiles(files, allowLines);
 
 /**
  * `git ls-files` is the publish set, which is the right thing to scan and also
@@ -77,9 +131,7 @@ try {
  * document. Untracked and not ignored means "about to be published and never
  * checked", so name them rather than silently skipping them.
  */
-const untracked = execSync('git ls-files --others --exclude-standard', { cwd: ROOT, encoding: 'utf8' })
-  .split('\n')
-  .filter(Boolean);
+const untracked = gitPaths('ls-files --others --exclude-standard');
 
 for (const f of files) {
   if (f === 'scripts/preflight.js') continue; // it names the patterns it bans
@@ -118,6 +170,26 @@ if (trackedData.length) {
   bad++;
 }
 
+if (uncovered.length) {
+  console.log(`  ${uncovered.length} scanned business(es) in data/ have no ${LEAKS.SCRUB_TERMS_FILE} entry covering`);
+  console.log('  them. A scan the term list has never heard of is a leak the term scan');
+  console.log('  cannot catch, which is how both history leaks happened. Add each name:');
+  for (const n of uncovered.slice(0, 10)) console.log(`    ${n}`);
+  if (uncovered.length > 10) console.log(`    ... and ${uncovered.length - 10} more`);
+  console.log('');
+  bad++;
+}
+
+if (unallowed.length) {
+  console.log(`  ${unallowed.length} tracked file(s) are neither known text nor listed in .binary-allow.`);
+  console.log('  Every leak scan here reads text, so anything else publishes unexamined,');
+  console.log("  and pixels carry a business's name as well as bytes do. Eyeball each");
+  console.log('  one, then list it:');
+  for (const f of unallowed.slice(0, 20)) console.log(`    ${f}`);
+  console.log('');
+  bad++;
+}
+
 if (untracked.length) {
   console.log(`  ${untracked.length} untracked file(s) were NOT scanned, because they are not in the`);
   console.log('  publish set yet. Stage them and run again before publishing:');
@@ -130,8 +202,8 @@ if (bad) {
 } else {
   console.log(
     `  ${files.length} tracked files, ${terms.length} operator term(s) checked.\n` +
-      '  Nothing under data/ is tracked.\n' +
-      '  No user paths, no key-shaped strings, no live email domains, PASS\n'
+      `  Nothing under data/ is tracked. ${scannedNames.length} scanned business(es) covered by the term list.\n` +
+      '  No unallowed binaries, no user paths, no key-shaped strings, no live email domains, PASS\n'
   );
 }
 process.exit(bad ? 1 : 0);

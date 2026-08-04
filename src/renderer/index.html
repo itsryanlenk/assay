@@ -233,6 +233,20 @@
         <textarea id="f-op-voice" rows="4" maxlength="1500"
                   placeholder="e.g. Write the way my site does: short sentences, plain words, no exclamation marks. Say &quot;we&quot; not &quot;I&quot;."></textarea>
       </div>
+      <div class="field"
+           data-tip="How the scorecard closes, above your signature. The house ask walks the owner through the pay-or-toss arithmetic. Your own words print exactly as typed.">
+        <label for="f-op-ask-mode">Closing ask</label>
+        <select id="f-op-ask-mode">
+          <option value="default">The house ask (worth paying to fix?)</option>
+          <option value="custom">My own words</option>
+        </select>
+      </div>
+      <div class="field"
+           data-tip="Used with My own words. Printed word for word at the end of the scorecard, above your signature. Leave it blank and the scorecard closes with just your signature. It takes no digits at all: a figure belongs to a finding the reader can reproduce, so spell numbers out or the packet refuses to generate.">
+        <label for="f-op-ask">Your ask (used with My own words)</label>
+        <textarea id="f-op-ask" rows="3" maxlength="700"
+                  placeholder="e.g. If this reads useful, reply to this email and we will walk your site together."></textarea>
+      </div>
       <button class="btn btn--primary" id="op-save" type="button"
               data-tip="Save these details on this machine. They are not secret and are shown back to you.">Save details</button>
     </div>
@@ -377,7 +391,10 @@
           <span class="q">claude</span> CLI, the only path this build implements. The model cannot
           change a score, count, hash or fix.</li>
         <li><b>Your details.</b> Name and email are printed on every artifact and are required to
-          generate anything. Brand voice, if you set one, steers how findings are worded.</li>
+          generate anything. Brand voice, if you set one, steers how findings are worded. The
+          closing ask is the house pitch unless you switch it to your own words, which print
+          exactly as typed; leave your own words blank and the scorecard closes with your
+          signature alone.</li>
         <li><b>Brand on documents.</b> Optional. An accent colour and a logo for the scorecard.
           Severity colours stay on the house scale, so a serious finding still reads as one.</li>
       </ul>

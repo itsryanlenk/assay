@@ -1360,6 +1360,67 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
     extDiff.phone.state, 'mismatch');
 }
 
+// --- the same-day scrub rule, made mechanical -------------------------------
+/**
+ * Both leaks that forced the 2026-08-04 rebuild were details of businesses
+ * the app itself had scanned, and the rule "anything the app scans goes in
+ * .scrub-terms the same day" lived in memory. scrub-coverage reads what
+ * data/ actually holds and refuses the build when a scanned business's name
+ * is not covered by the term list; preflight wires it in. These pin the pure
+ * parts; preflight's end-to-end behaviour is simulated separately.
+ */
+{
+  const SC = require(path.join(ROOT, 'scripts/scrub-coverage.js'));
+
+  eq('a client slug yields the business name', SC.nameFromSlug('Rockport-ME__Example-Boutique'), 'Example Boutique');
+  eq('a slug with no business part yields nothing', SC.nameFromSlug('loose-folder'), null);
+  eq('a slug with an empty business part yields nothing', SC.nameFromSlug('Town-ST__'), null);
+
+  eq('an exact term covers the name', SC.covered('Example Boutique', ['example boutique']), true);
+  eq('a partial term covers the name', SC.covered('Example Boutique', ['boutique']), true);
+  eq('coverage is case-insensitive', SC.covered('EXAMPLE BOUTIQUE', ['Boutique']), true);
+  eq('an unrelated term does not cover', SC.covered('Example Boutique', ['dockside grill']), false);
+  // "co" is inside "Example Boutique" spelled backwards nowhere, but a term
+  // that short would cover almost any name by accident; short terms do not count.
+  eq('a too-short term never counts as coverage', SC.covered('Example Boutique', ['le b']), false);
+  eq('no terms means nothing is covered', SC.covered('Example Boutique', []), false);
+  // The slug backstop drops punctuation, and the term list keeps it. The
+  // operator who added the name exactly as the business writes it must not
+  // be failed by an apostrophe the folder name could never hold.
+  eq('punctuation the slug dropped does not defeat coverage',
+    SC.covered('Danes Diner', ["Dane's Diner"]), true);
+  // A name shorter than the floor must still be clearable, or the gate fails
+  // forever and its own remedy line is a lie.
+  eq('a name shorter than the floor is covered by its own exact term',
+    SC.covered('Zia', ['Zia']), true);
+  eq('a fragment still never covers a short name', SC.covered('Zia', ['ia']), false);
+
+  eq('missingCoverage names only the uncovered',
+    SC.missingCoverage(['Example Boutique', 'Dockside Grill'], ['boutique']),
+    ['Dockside Grill']);
+
+  eq('an unallowed tracked binary is named',
+    SC.nonTextFiles(['assets/icon.png', 'src/main/main.ts', 'docs/shot.PNG'], ['assets/icon.png']),
+    ['docs/shot.PNG']);
+  eq('allowlist comments and blanks are ignored',
+    SC.nonTextFiles(['assets/icon.ico'], ['# app icons', '', 'assets/icon.ico']),
+    []);
+  eq('a text file is never a binary finding',
+    SC.nonTextFiles(['README.md', 'src/renderer/index.html'], []),
+    []);
+  // The gate lists what is KNOWN text and refuses the rest, because listing
+  // binary extensions failed open on exactly the formats phones produce.
+  eq('an iPhone screenshot format is refused',
+    SC.nonTextFiles(['docs/shot.heic'], []), ['docs/shot.heic']);
+  eq('an unknown extension is refused, not presumed text',
+    SC.nonTextFiles(['data-dump.blob'], []), ['data-dump.blob']);
+  eq('an extensionless blob is refused unless allowed',
+    SC.nonTextFiles(['LICENSE2'], []), ['LICENSE2']);
+  eq('the standard extensionless text files are known',
+    SC.nonTextFiles(['LICENSE', '.gitignore', '.gitattributes', '.nvmrc', '.binary-allow'], []),
+    []);
+}
+
 // --- nap: run() end to end, through the same aspect path the tests use ------
 /**
  * run() must go through aspectsFor, not a private copy of it. This drives a

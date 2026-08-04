@@ -517,7 +517,7 @@ export function registerHandlers(): void {
       // object to the renderers would let any future renderer that dumps
       // operator fields put it on a client PDF.
       const op = config.load().operator;
-      const operator = { name: op.name, email: op.email, scannerUrl: op.scannerUrl };
+      const operator = { name: op.name, email: op.email, scannerUrl: op.scannerUrl, askMode: op.askMode, ask: op.ask };
       // Derived here, from validated config, so nothing operator-typed
       // reaches a renderer's CSS or an <img> without passing the checks.
       const brand = brandContext(config.load().brand, config.brandDir());

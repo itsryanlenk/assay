@@ -43,7 +43,7 @@ const DEFAULTS: AppConfig = {
   keys: { googlePlaces: null, anthropic: null, lob: null, postgrid: null },
   agent: { mode: 'auto' },
   defaults: { city: '', category: '', limit: 10 },
-  operator: { name: '', email: '', scannerUrl: '', brandVoice: '' },
+  operator: { name: '', email: '', scannerUrl: '', askMode: 'default', ask: '', brandVoice: '' },
   brand: { accent: '', logo: '' },
 };
 
@@ -55,9 +55,21 @@ const DEFAULTS: AppConfig = {
  */
 export const BRAND_VOICE_MAX = 1500;
 
+/**
+ * The closing ask prints inside one scorecard block, and the no-split print
+ * rule can only keep a block whole if a block never outgrows a page. This
+ * caps the characters; the renderer separately caps the paragraph count,
+ * because seven hundred characters of blank lines is tall and cheap.
+ */
+export const ASK_MAX = 700;
+
 /** Cap without bisecting an astral character into a lone surrogate. */
+function capped(s: string, max: number): string {
+  return s.trim().slice(0, max).replace(/[\uD800-\uDBFF]$/, '');
+}
+
 function capVoice(s: string): string {
-  return s.trim().slice(0, BRAND_VOICE_MAX).replace(/[\uD800-\uDBFF]$/, '');
+  return capped(s, BRAND_VOICE_MAX);
 }
 
 let cache: AppConfig | null = null;
@@ -283,6 +295,8 @@ function coerce(raw: unknown): AppConfig {
     if (typeof o.name === 'string') base.operator.name = o.name.trim();
     if (typeof o.email === 'string') base.operator.email = o.email.trim();
     if (typeof o.scannerUrl === 'string') base.operator.scannerUrl = o.scannerUrl.trim();
+    if (o.askMode === 'default' || o.askMode === 'custom') base.operator.askMode = o.askMode;
+    if (typeof o.ask === 'string') base.operator.ask = capped(o.ask, ASK_MAX);
     if (typeof o.brandVoice === 'string') {
       base.operator.brandVoice = capVoice(o.brandVoice);
     }
@@ -426,6 +440,8 @@ export function setOperator(partial: Partial<AppConfig['operator']>): ConfigStat
   if (typeof partial.name === 'string') cfg.operator.name = partial.name.trim();
   if (typeof partial.email === 'string') cfg.operator.email = partial.email.trim();
   if (typeof partial.scannerUrl === 'string') cfg.operator.scannerUrl = partial.scannerUrl.trim();
+  if (partial.askMode === 'default' || partial.askMode === 'custom') cfg.operator.askMode = partial.askMode;
+  if (typeof partial.ask === 'string') cfg.operator.ask = capped(partial.ask, ASK_MAX);
   if (typeof partial.brandVoice === 'string') {
     cfg.operator.brandVoice = capVoice(partial.brandVoice);
   }

@@ -1,0 +1,6 @@
+# Tracked binary files preflight may publish, one exact repo path per line.
+# Every leak scan in this repo reads text, so anything listed here ships
+# UNEXAMINED by every gate. Before adding a line, open the file and confirm
+# no business name, address, phone number or key is in it, pixels included.
+assets/icon.ico
+assets/icon.png

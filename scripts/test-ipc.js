@@ -476,6 +476,41 @@ async function run(win) {
       setLongVoice.data.operator.brandVoice.length === 1500,
     String(setLongVoice && setLongVoice.ok && setLongVoice.data.operator.brandVoice.length));
 
+  // --- the closing ask: stored, trimmed, capped ----------------------------
+  const setAsk = await inRenderer(
+    win,
+    `return await window.assay.config.setOperator({ ask: '  Reply and we will walk your site together.  ' });`
+  );
+  check('config:setOperator stores a trimmed closing ask',
+    setAsk && setAsk.ok === true &&
+      setAsk.data.operator.ask === 'Reply and we will walk your site together.' &&
+      setAsk.data.operator.name === 'Operator',
+    JSON.stringify(setAsk && setAsk.ok && setAsk.data.operator));
+
+  const setLongAsk = await inRenderer(
+    win,
+    `return await window.assay.config.setOperator({ ask: 'y'.repeat(9000) });`
+  );
+  check('an essay of an ask is capped at the block size',
+    setLongAsk && setLongAsk.ok === true && setLongAsk.data.operator.ask.length === 700,
+    String(setLongAsk && setLongAsk.ok && setLongAsk.data.operator.ask.length));
+
+  const setAskMode = await inRenderer(
+    win,
+    `return await window.assay.config.setOperator({ askMode: 'custom' });`
+  );
+  check('config:setOperator stores the ask mode',
+    setAskMode && setAskMode.ok === true && setAskMode.data.operator.askMode === 'custom',
+    JSON.stringify(setAskMode && setAskMode.ok && setAskMode.data.operator));
+
+  const setBadAskMode = await inRenderer(
+    win,
+    `return await window.assay.config.setOperator({ askMode: 'shout-it' });`
+  );
+  check('an unknown ask mode is ignored, never stored',
+    setBadAskMode && setBadAskMode.ok === true && setBadAskMode.data.operator.askMode === 'custom',
+    JSON.stringify(setBadAskMode && setBadAskMode.ok && setBadAskMode.data.operator));
+
   {
     const BV = require(path.join(APP_ROOT, 'dist/main/main/agent/brand-voice.js'));
     const base = 'RULES.\n- Invent nothing.';

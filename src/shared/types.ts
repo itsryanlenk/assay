@@ -459,6 +459,23 @@ export type AppConfig = {
     /** Where the prospect can re-run the scan themselves. May be empty. */
     scannerUrl: string;
     /**
+     * Which closing ask the scorecard prints: the house pitch ('default') or
+     * the operator's own words ('custom'). Default preserves what every
+     * packet has always printed.
+     */
+    askMode: 'default' | 'custom';
+    /**
+     * The operator's own closing ask, printed verbatim (escaped) at the end
+     * of the scorecard's owner page above the signature when askMode is
+     * 'custom'. Blank in custom mode means the document closes with the
+     * signature alone; nothing stock is substituted. Held to a stricter wall
+     * than the document sweep (guardrails.ts sweepAsk): no digits at all and
+     * no invisible characters, because verbatim operator prose is the one
+     * channel where a fabricated figure would print under the operator's own
+     * signature. May be empty.
+     */
+    ask: string;
+    /**
      * The operator's voice instructions for the model that rewords findings
      * into owner-facing sentences. Tone and word choice only: it is fenced
      * below the mandatory rules at the one place the agent is invoked, so it

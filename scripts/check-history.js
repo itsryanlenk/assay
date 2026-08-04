@@ -33,6 +33,18 @@ function git(args) {
   return execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 }
 
+/**
+ * Tree paths, NUL-separated and unquoted. Default quoting octal-escapes any
+ * non-ASCII path inside double quotes, which defeats the extension filter
+ * AND makes the later `git show commit:path` miss, silently skipping the
+ * blob. Same escape preflight closed; same fix.
+ */
+function treePaths(commit) {
+  return git(['-c', 'core.quotepath=false', 'ls-tree', '-r', '-z', '--name-only', commit])
+    .split('\0')
+    .filter(Boolean);
+}
+
 /** Text files only. A binary blob cannot carry a term we would recognise. */
 const TEXTUAL = /\.(js|ts|tsx|json|md|yml|yaml|html|css|txt|sh|ps1)$/i;
 
@@ -92,7 +104,7 @@ function main() {
   const baseline = new Set();
   try {
     const base = range.split('..')[0];
-    for (const file of git(['ls-tree', '-r', '--name-only', base]).split('\n').filter((f) => f && TEXTUAL.test(f))) {
+    for (const file of treePaths(base).filter((f) => TEXTUAL.test(f))) {
       let text;
       try {
         text = git(['show', `${base}:${file}`]);
@@ -110,9 +122,7 @@ function main() {
   let blobsScanned = 0;
 
   for (const commit of commits) {
-    const files = git(['ls-tree', '-r', '--name-only', commit])
-      .split('\n')
-      .filter((f) => f && TEXTUAL.test(f));
+    const files = treePaths(commit).filter((f) => TEXTUAL.test(f));
     for (const file of files) {
       let text;
       try {
