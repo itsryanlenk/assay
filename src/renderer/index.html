@@ -44,11 +44,21 @@
 
     <h1>Find one business<br>with a real problem.</h1>
     <p class="sub">
-      Candidates come from the <b>Google Places API</b>, never from scraped Maps HTML.
+      Candidates come from the <b>Google Places API</b> or from an address you type,
+      never from scraped Maps HTML.
       Six checks read each site's raw source and record the evidence behind every
       finding. <b>REMOTE</b> means the app found it and you have not
       confirmed it yet; nothing reaches a document until you do.
     </p>
+
+    <div class="scan-modes" role="tablist" aria-label="How to add a business">
+      <button class="btn btn--ghost scan-mode is-on" id="mode-area" type="button"
+              role="tab" aria-selected="true" aria-controls="scan-form"
+              data-tip="Search an area through the Places API. Needs a key with billing active.">Find by area</button>
+      <button class="btn btn--ghost scan-mode" id="mode-url" type="button"
+              role="tab" aria-selected="false" aria-controls="url-form"
+              data-tip="Scan a business you already know by typing its web address. No API key, no billing.">Scan a URL</button>
+    </div>
 
     <div class="block panel" id="key-warning" hidden>
       <span class="chip red">NO API KEY</span>
@@ -56,9 +66,26 @@
       <p>
         Add a Google Places key in <b>Settings</b>. It needs <b>Places API (New)</b>
         enabled and billing active on the project. The key is stored on this machine
-        only, in your user data folder.
+        only, in your user data folder. <b>Scan a URL</b> needs no key.
       </p>
     </div>
+
+    <form class="toolbar" id="url-form" autocomplete="off" hidden>
+      <div class="field field--grow" data-tip="The business's own web address. Maps and Search hosts are refused here, and private addresses are refused here and again at every redirect the fetch follows.">
+        <label for="f-url">Web address</label>
+        <input id="f-url" name="url" type="text" placeholder="example.com" required>
+      </div>
+      <div class="field field--grow" data-tip="Printed on every artifact and used for the folder name.">
+        <label for="f-url-name">Business name</label>
+        <input id="f-url-name" name="name" type="text" placeholder="Example Boutique" required>
+      </div>
+      <div class="field field--grow" data-tip="Optional. Names the client folder, like Rockport-ME. It is a label: no check compares it to anything, and a typed address is never treated as a listing.">
+        <label for="f-url-town">Town (optional)</label>
+        <input id="f-url-town" name="town" type="text" placeholder="Rockport, ME">
+      </div>
+      <button class="btn btn--primary" id="url-go" type="submit"
+              data-tip="Add this business to the table. No network call happens until you press CHECK.">Add</button>
+    </form>
 
     <form class="toolbar" id="scan-form" autocomplete="off">
       <div class="field field--grow" data-tip="Town and state to search, e.g. Asheville, NC. Passed to the Places API as typed.">
@@ -297,8 +324,12 @@
       <span class="chip">THE FLOW</span>
       <h2>Five steps, in order.</h2>
       <ul class="flat">
-        <li><b>1 · Find.</b> On <b>Scan</b>, enter a city and a category and pull candidates from
-          the Google Places API. Every row is Places data; no Maps HTML is scraped.</li>
+        <li><b>1 · Find.</b> On <b>Scan</b>, either enter a city and a category and pull
+          candidates from the Google Places API, or switch to <b>Scan a URL</b> and type the
+          address of a business you already know, which needs no key. No Maps HTML is
+          scraped either way. A typed address carries no listing at all, so the checks that
+          compare a site against its listing record that they had nothing to compare and can
+          never report a mismatch.</li>
         <li><b>2 · Check.</b> Press <b>Check</b> on a candidate to run the six flaw checks against
           its own fetched page source. Findings come back <b>REMOTE</b>: real, logged, and not
           yet safe to send.</li>
@@ -377,7 +408,8 @@
           rather than repairs.</li>
         <li><b>3.</b> Nothing auto-sends, auto-posts or auto-prints. Approval is per item.</li>
         <li><b>4.</b> Every score prints its instrument and its base.</li>
-        <li><b>5.</b> Discovery is the Places API plus the business's own site, nothing else.</li>
+        <li><b>5.</b> Discovery is the Places API, an address you type, and the business's own
+          site, nothing else.</li>
       </ul>
     </div>
 

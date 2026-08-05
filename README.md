@@ -21,11 +21,12 @@ at length.
 It is built for one person doing outreach by hand, and it automates the process
 that person already runs:
 
-1. **Find a business.** Google Places API, one search area at a time. Results
-   list as a table, and a **MAP** toggle plots the ones that carry coordinates
-   so you can see which are clustered and which are out on their own. The map
-   costs no extra API: those coordinates arrive with the search you already
-   paid for.
+1. **Find a business,** two ways. Search an area through the Google Places API,
+   one area at a time, and results list as a table with a **MAP** toggle that
+   plots the ones carrying coordinates. The map costs no extra API: those
+   coordinates arrive with the search you already paid for. Or type the address
+   of a business you already know, which needs no key and no billing and puts
+   one row in the same table.
 2. **Score what the site actually serves.** Six checks fetch the business's own
    pages and score the raw source. A summary of a page is never evidence here.
 3. **Reconcile the findings yourself.** You open the page in your own browser,
@@ -99,7 +100,7 @@ breaks a law breaks a test or a type rather than a convention.
 | 2 | Never fabricate a review, testimonial or result. | `src/main/packet/guardrails.ts`, swept over every artifact and over the index prose before anything is written. It refuses rather than repairs. |
 | 3 | Nothing auto-sends, auto-posts or auto-prints. Approval is per item. | `src/main/approval/gate.ts` registers every `ApprovedItem` in a module-private `WeakSet` at the moment it is minted, so `assertMinted` refuses anything that did not come through the approval gate, including a cast. The `unique symbol` on the type is a compile-time brand and is erased at build; the runtime guarantee is the set. The gate calls the same `releasable()` that generation calls, so the two cannot disagree, and it refuses an artifact whose bytes changed after approval or one a later scan has superseded. There is deliberately **no unapprove**; a rejection can be reopened, which returns the item to `prepared` rather than clearing it to send. Today no sender implementation exists either: `src/main/send/provider.ts` defines the outbound signature and nothing implements it. |
 | 4 | Every score prints its instrument and its base. | The `Score` type has no optional fields, so omitting the base is a compile error. |
-| 5 | Discovery is the Places API plus the business's own site. | A single discovery adapter. `fetch-raw` refuses Google Maps and Search hosts, and private or loopback addresses, on every redirect hop. |
+| 5 | Discovery is the Places API, an address you type, and the business's own site. | Two entry points and one egress. `src/main/discovery/places.ts` calls Places; `src/main/discovery/from-url.ts` takes an address you type and mints no listing data. Both reach the site through `fetch-raw`, which refuses Google Maps and Search hosts, and private or loopback addresses, on every redirect hop. `from-url` applies that same list at the form, so a Maps URL is refused before anything is fetched. |
 
 Model output is used for exactly one thing: rewording a verdict the
 deterministic layer already computed into a sentence an owner would understand.

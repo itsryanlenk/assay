@@ -32,6 +32,7 @@ const CH = {
   packetGenerate: 'packet:generate',
   configSetAgentMode: 'config:setAgentMode',
   discoverSearch: 'discover:search',
+  discoverFromUrl: 'discover:fromUrl',
   checksRun: 'checks:run',
   agentProbe: 'agent:probe',
   confirmRun: 'confirm:run',
@@ -89,6 +90,7 @@ const api = {
   },
   discover: {
     search: (req: Record<string, unknown>) => ipcRenderer.invoke(CH.discoverSearch, req),
+    fromUrl: (req: Record<string, unknown>) => ipcRenderer.invoke(CH.discoverFromUrl, req),
   },
   checks: {
     run: (req: Record<string, unknown>) => ipcRenderer.invoke(CH.checksRun, req),

@@ -401,6 +401,75 @@ async function runScan(append) {
   renderResults(append);
 }
 
+/**
+ * Adds one typed URL to the same candidate table the Places search fills.
+ * Nothing is fetched here; CHECK does that, through the same policy gate.
+ */
+async function addUrlCandidate() {
+  const url = $('#f-url').value.trim();
+  const name = $('#f-url-name').value.trim();
+  const town = $('#f-url-town').value.trim();
+
+  $('#url-go').disabled = true;
+  setStatus('working', 'ADDING…', name || url);
+
+  let res;
+  try {
+    res = await api.discover.fromUrl({ url, name, town });
+  } catch (e) {
+    res = { ok: false, error: { kind: 'internal', message: 'The app could not reach its own main process.', detail: String(e) } };
+  }
+
+  $('#url-go').disabled = false;
+
+  if (!res || !res.ok) {
+    const error = (res && res.error) || { kind: 'internal', message: 'Unknown failure.' };
+    // Not describeError: every refusal on this path is about what the operator
+    // typed, and its generic bad_request tail calls that an app bug.
+    setStatus('error', 'CANNOT SCAN THAT', error.message, error.detail);
+    return;
+  }
+
+  const candidate = res.data;
+  if (state.scanId === null) state.scanId = newScanId();
+
+  // One row per site. Re-adding a site replaces its row rather than stacking.
+  const at = state.candidates.findIndex((c) => c.placeId === candidate.placeId);
+  if (at === -1) {
+    state.candidates.push(candidate);
+  } else {
+    // One row per host. Replacing silently would delete the previous
+    // business's row and its findings panel with no message.
+    const previous = state.candidates[at];
+    state.candidates[at] = candidate;
+    if (previous.name !== candidate.name) {
+      setStatus('working', 'REPLACED', `${previous.name} and ${candidate.name} share the host ${candidate.placeId.slice(4)}, so this row now holds ${candidate.name}.`);
+    }
+  }
+
+  state.nextPageToken = null;
+  clearStatus();
+  $('#results-note').textContent = `${state.candidates.length} added by hand`;
+  $('#quota-detail').textContent = '';
+  renderResults(false);
+
+  $('#f-url').value = '';
+  $('#f-url-name').value = '';
+  $('#f-url').focus();
+}
+
+/** Swaps which form is showing. The key warning belongs to the area tab. */
+function setScanMode(mode) {
+  const area = mode === 'area';
+  $('#mode-area').classList.toggle('is-on', area);
+  $('#mode-url').classList.toggle('is-on', !area);
+  $('#mode-area').setAttribute('aria-selected', String(area));
+  $('#mode-url').setAttribute('aria-selected', String(!area));
+  $('#scan-form').hidden = !area;
+  $('#url-form').hidden = area;
+  applyKeyWarning();
+}
+
 // --- Flaw checks -------------------------------------------------------------
 
 /**
@@ -1259,10 +1328,20 @@ async function saveOperator() {
   setStatus('empty', 'SAVED', 'Artifacts will be signed with these details.', null, SETTINGS_STATUS);
 }
 
+/**
+ * The missing-key warning belongs to the area tab. On the URL tab there is
+ * nothing to warn about, because that path never calls Places.
+ */
+function applyKeyWarning() {
+  const present = state.config && state.config.keys.googlePlaces.present;
+  const onUrlTab = $('#url-form') && !$('#url-form').hidden;
+  $('#key-warning').hidden = Boolean(present) || Boolean(onUrlTab);
+}
+
 function applyConfig(cfg) {
   state.config = cfg;
   $('#cfg-path').textContent = cfg.configPath;
-  $('#key-warning').hidden = cfg.keys.googlePlaces.present;
+  applyKeyWarning();
   $('#f-agent-mode').value = cfg.agent.mode;
   if (!$('#f-city').value && cfg.defaults.city) $('#f-city').value = cfg.defaults.city;
   if (!$('#f-category').value && cfg.defaults.category) $('#f-category').value = cfg.defaults.category;
@@ -1999,6 +2078,14 @@ async function boot() {
     e.preventDefault();
     void runScan(false);
   });
+
+  $('#url-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    void addUrlCandidate();
+  });
+
+  $('#mode-area').addEventListener('click', () => setScanMode('area'));
+  $('#mode-url').addEventListener('click', () => setScanMode('url'));
 
   $('#load-more').addEventListener('click', () => void runScan(true));
   $('#map-toggle').addEventListener('click', () => {

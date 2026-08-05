@@ -24,6 +24,12 @@ export const CH = {
   discoverSearch: 'discover:search',
 
   /**
+   * UrlCandidateRequest -> Candidate. The keyless door: a web address the
+   * operator types, validated and refused by the same rules fetch-raw applies.
+   */
+  discoverFromUrl: 'discover:fromUrl',
+
+  /**
    * RunCheckRequest -> FlawFinding. Runs the flaw checks for one candidate.
    * Findings come back 'remote' and cannot be turned into artifacts until the
    * operator confirms them with their own view-source (Phase 4).

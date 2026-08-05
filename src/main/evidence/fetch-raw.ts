@@ -64,7 +64,11 @@ export type RawCapture = {
  * tool banned before it ships a single postcard.
  */
 const REFUSED = [
-  { test: (u: URL) => u.hostname === 'maps.google.com', why: 'Google Maps HTML' },
+  {
+    // Label boundary, not equality: `www.maps.google.com` is the same service.
+    test: (u: URL) => /(^|\.)maps\.google\.[a-z.]+$/i.test(u.hostname),
+    why: 'Google Maps HTML',
+  },
   {
     test: (u: URL) => isPrivateHostLiteral(u.hostname),
     why: 'a private or loopback address',
@@ -82,6 +86,22 @@ const REFUSED = [
     why: 'Google Search HTML',
   },
 ];
+
+/**
+ * Why this URL may not be read, or null. Shared with discovery/from-url.ts so
+ * a typed address is refused at the form with the same rule and the same words.
+ */
+export function refusalFor(u: URL): string | null {
+  // A fully-qualified name keeps its trailing dot in URL.hostname, and
+  // `maps.google.com.` resolves to the same host the equality test refuses.
+  // Normalise once here so every rule sees the same string.
+  if (u.hostname.endsWith('.')) {
+    const flat = new URL(u.toString());
+    flat.hostname = u.hostname.replace(/\.+$/, '');
+    return REFUSED.find((r) => r.test(flat))?.why ?? null;
+  }
+  return REFUSED.find((r) => r.test(u))?.why ?? null;
+}
 
 /**
  * SSRF guard.
@@ -526,10 +546,10 @@ export async function fetchRaw(rawUrl: string, opts: FetchRawOptions): Promise<R
         return { ref, body: '', captured: false };
       }
 
-      const refused = REFUSED.find((r) => r.test(current));
+      const refused = refusalFor(current);
       if (refused) {
         // Reached via redirect or asked for directly, the answer is the same.
-        ref.transportError = `refused: ${refused.why} is off limits by project law`;
+        ref.transportError = `refused: ${refused} is off limits by project law`;
         ref.redirectChain = redirectChain.length ? redirectChain : undefined;
         return { ref, body: '', captured: false };
       }

@@ -59,6 +59,7 @@ const PACKET_RENDERERS: Renderer[] = [
 const fontsDir = (): string => path.resolve(__dirname, '..', '..', '..', '..', 'assets', 'fonts');
 import * as config from '../config/store';
 import { searchPlaces } from '../discovery/places';
+import { candidateFromUrl } from '../discovery/from-url';
 import { providerFor } from '../agent/resolve';
 import { withBrandVoice } from '../agent/brand-voice';
 import { runChecks } from '../checks/registry';
@@ -250,6 +251,22 @@ export function registerHandlers(): void {
       if (result.ok) config.setDefaults({ city, category, limit: req.limit });
 
       return result;
+    })
+  );
+
+  /**
+   * Validation lives in main, not the renderer. The refusal list is a security
+   * rule, and a rule the renderer owns is a rule a renderer bug removes.
+   */
+  ipcMain.handle(
+    CH.discoverFromUrl,
+    safe(CH.discoverFromUrl, (payload) => {
+      const p = (payload ?? {}) as Record<string, unknown>;
+      return candidateFromUrl({
+        url: typeof p.url === 'string' ? p.url : '',
+        name: typeof p.name === 'string' ? p.name : '',
+        town: typeof p.town === 'string' ? p.town : '',
+      });
     })
   );
 

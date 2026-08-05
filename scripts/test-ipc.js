@@ -164,6 +164,50 @@ async function run(win) {
     JSON.stringify(noKey && noKey.error)
   );
 
+  // --- 7b. discover:fromUrl, the keyless door ------------------------------
+  // No Places key is set at this point, which is the whole point: this path
+  // must work without one.
+  const fromUrl = await inRenderer(
+    win,
+    `return await window.assay.discover.fromUrl({ url: 'example-boutique.test', name: 'Example Boutique', town: 'Rockport, ME' });`
+  );
+  check(
+    'discover:fromUrl builds a candidate with no Places key set',
+    fromUrl && fromUrl.ok === true && fromUrl.data.website === 'https://example-boutique.test/' &&
+      fromUrl.data.source === 'operator-url' && fromUrl.data.phone === null,
+    JSON.stringify(fromUrl && (fromUrl.data || fromUrl.error))
+  );
+
+  const urlBadScheme = await inRenderer(
+    win,
+    `return await window.assay.discover.fromUrl({ url: 'file:///C:/windows', name: 'X' });`
+  );
+  check(
+    'discover:fromUrl refuses a non-http scheme',
+    urlBadScheme && urlBadScheme.ok === false && urlBadScheme.error.kind === 'bad_request',
+    JSON.stringify(urlBadScheme && urlBadScheme.error)
+  );
+
+  const mapsUrl = await inRenderer(
+    win,
+    `return await window.assay.discover.fromUrl({ url: 'https://maps.google.com/place/x', name: 'X' });`
+  );
+  check(
+    'discover:fromUrl refuses Maps by name, at the form',
+    mapsUrl && mapsUrl.ok === false && /Maps/i.test(mapsUrl.error.message),
+    JSON.stringify(mapsUrl && mapsUrl.error)
+  );
+
+  const noName = await inRenderer(
+    win,
+    `return await window.assay.discover.fromUrl({ url: 'https://example.test/', name: '' });`
+  );
+  check(
+    'discover:fromUrl requires a business name',
+    noName && noName.ok === false && noName.error.kind === 'bad_request',
+    JSON.stringify(noName && noName.error)
+  );
+
   // --- 8. app:openExternal scheme guard -----------------------------------
   const badScheme = await inRenderer(
     win,

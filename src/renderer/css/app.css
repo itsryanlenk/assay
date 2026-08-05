@@ -1140,3 +1140,15 @@ tr.cand-row.is-map-selected > td {
   letter-spacing: 0.5px;
   color: var(--color-muted, #55524a);
 }
+
+/* The two doors into the candidate table. The on state carries the same
+   filled treatment the active nav button uses. */
+.scan-modes {
+  display: flex;
+  gap: var(--space-8, 8px);
+  margin: var(--space-14, 14px) 0 var(--space-10, 10px);
+}
+.scan-modes .scan-mode.is-on {
+  background: var(--color-ink, #111);
+  color: var(--color-paper, #fff);
+}

@@ -928,7 +928,7 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
   const BP = require(path.join(ROOT, 'dist/main/main/checks/booking-path.js'));
   const NAP = require(path.join(ROOT, 'dist/main/main/checks/nap-consistency.js'));
 
-  const cand = { name: 'Example Co', address: '12 Main St, Rockport, ME 00000, USA', phone: '(555) 111-2222' };
+  const cand = { name: 'Example Co', address: '12 Main St, Rockport, ME 00000, USA', phone: '(555) 111-2222', source: 'google-places-new' };
 
   const wsBase = {
     listedWebsite: 'https://a.com', finalUrl: 'https://a.com/', httpStatus: 200, transportError: null,
@@ -1270,7 +1270,7 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
  */
 {
   const NAP = require(path.join(ROOT, 'dist/main/main/checks/nap-consistency.js'));
-  const cand = (phone) => ({ name: 'Example Plumbing', address: '100 Example Rd, Springfield, ST 00000, USA', phone });
+  const cand = (phone) => ({ name: 'Example Plumbing', address: '100 Example Rd, Springfield, ST 00000, USA', phone, source: 'google-places-new' });
 
   const siteHtml =
     '<footer><a href="tel:5550001111"><span>(555) 000-1111</span></a>' +
@@ -1421,6 +1421,88 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
     []);
 }
 
+// --- candidateFromUrl: the second door into the candidate table -------------
+/**
+ * A typed URL produces a Candidate with no listing data. The refusals are the
+ * same list fetch-raw enforces, applied at the form so the reason is readable.
+ */
+{
+  const FU = require(path.join(ROOT, 'dist/main/main/discovery/from-url.js'));
+  const P = require(path.join(ROOT, 'dist/main/main/packet/paths.js'));
+  const NAP = require(path.join(ROOT, 'dist/main/main/checks/nap-consistency.js'));
+
+  const good = FU.candidateFromUrl({ url: 'https://example-boutique.test/', name: 'Example Boutique' });
+  eq('a valid https URL builds a candidate', good.ok, true);
+  eq('the website is the normalized URL', good.ok && good.data.website, 'https://example-boutique.test/');
+  eq('provenance says the operator typed it', good.ok && good.data.source, 'operator-url');
+  eq('no listing data is invented', good.ok && [good.data.phone, good.data.location, good.data.rating, good.data.reviewCount, good.data.primaryType, good.data.mapsUri],
+    [null, null, null, null, null, null]);
+
+  eq('a bare domain is assumed https',
+    FU.candidateFromUrl({ url: 'example-boutique.test', name: 'X' }).data.website,
+    'https://example-boutique.test/');
+  eq('http is accepted', FU.candidateFromUrl({ url: 'http://example.test/', name: 'X' }).ok, true);
+  eq('whitespace around the URL is trimmed',
+    FU.candidateFromUrl({ url: '  https://example.test/  ', name: 'X' }).ok, true);
+
+  // Refusals. Each is a host fetch-raw already refuses; catching them here
+  // names the reason instead of failing at fetch time.
+  const refused = (url) => {
+    const r = FU.candidateFromUrl({ url, name: 'X' });
+    return r.ok === false && r.error.kind === 'bad_request';
+  };
+  eq('ftp is refused', refused('ftp://example.test/'), true);
+  eq('javascript: is refused', refused('javascript:alert(1)'), true);
+  eq('file: is refused', refused('file:///C:/windows/system32'), true);
+  eq('data: is refused', refused('data:text/html,<h1>x</h1>'), true);
+  eq('Google Maps is refused', refused('https://maps.google.com/place/x'), true);
+  eq('a Maps path on any Google TLD is refused', refused('https://google.co.uk/maps/place/x'), true);
+  eq('Google Search is refused', refused('https://www.google.com/search?q=x'), true);
+  eq('a loopback literal is refused', refused('http://127.0.0.1:8080/'), true);
+  eq('a private literal is refused', refused('http://192.168.1.1/'), true);
+  eq('the link-local metadata address is refused', refused('http://169.254.169.254/'), true);
+  eq('a blank URL is refused', refused(''), true);
+  // Found by the adversary pass: the equality test let a fully-qualified name
+  // and a www. prefix reach Maps, and a bare-colon scheme test misread a port.
+  eq('a trailing-dot Maps host is refused', refused('https://maps.google.com./place/x'), true);
+  eq('a www-prefixed Maps host is refused', refused('https://www.maps.google.com/place/x'), true);
+  eq('credentials in the address are refused', refused('https://user:pw@example.test/'), true);
+  eq('a host with a port parses rather than reading as a scheme',
+    FU.candidateFromUrl({ url: 'example.test:8080', name: 'X' }).data.website,
+    'https://example.test:8080/');
+  eq('a name is required',
+    FU.candidateFromUrl({ url: 'https://example.test/', name: '   ' }).ok, false);
+
+  // The row id keys the DOM and must not drift between scans of one site.
+  const a = FU.candidateFromUrl({ url: 'https://example.test/', name: 'X' });
+  const b = FU.candidateFromUrl({ url: 'https://example.test/about', name: 'X' });
+  const c = FU.candidateFromUrl({ url: 'https://other.test/', name: 'X' });
+  eq('placeId is stable across scans of one site', a.data.placeId, b.data.placeId);
+  eq('placeId separates two sites', a.data.placeId !== c.data.placeId, true);
+  eq('placeId is DOM-safe', /^[A-Za-z0-9:._-]+$/.test(a.data.placeId), true);
+
+  // Town drives the packet folder, and nothing else.
+  const town = FU.candidateFromUrl({ url: 'https://example.test/', name: 'Example Boutique', town: 'Rockport, ME' });
+  eq('a town becomes the folder location',
+    P.businessSlug(town.data), 'Rockport-ME__Example-Boutique');
+  eq('no town still produces a folder',
+    P.businessSlug(a.data), 'Unknown-Location__X');
+
+  /**
+   * The false-accusation guard. With no listing to compare against, every NAP
+   * aspect must report no-reference, which the verdict layer is forbidden from
+   * turning into a flaw.
+   */
+  const html = '<p>Call (555) 000-1111. 170 Harbor Rd, Rockport ME 00000.</p>';
+  const aspects = NAP.__test.aspectsFor(html, town.data);
+  eq('a URL candidate cannot produce a phone mismatch', aspects.phone.state, 'no-reference');
+  eq('a URL candidate cannot produce a street mismatch', aspects.street.state, 'no-reference');
+  eq('a URL candidate cannot produce a postal mismatch', aspects.postal.state, 'no-reference');
+  const verdicts = NAP.__test.verdicts(aspects, town.data, null);
+  eq('and no verdict claims a mismatch',
+    verdicts.some((v) => String(v.variant || '').includes('mismatch')), false);
+}
+
 // --- nap: run() end to end, through the same aspect path the tests use ------
 /**
  * run() must go through aspectsFor, not a private copy of it. This drives a
@@ -1448,6 +1530,7 @@ async function napRunEndToEnd() {
       address: '100 Example Rd, Springfield, ST 00000, USA',
       phone: '(555) 000-1111 x12',
       website: 'https://example.test/',
+      source: 'google-places-new',
     },
     scanId: 'test-scan',
     evidenceRoot: '(unused)',
@@ -1461,14 +1544,66 @@ async function napRunEndToEnd() {
   eq('run(): severity 0 never calls the model', agentCalls, 0);
 }
 
+/**
+ * A typed candidate has no Google listing. Driven through run(), because the
+ * listing fields are derived inside it: a test that hands verdicts() its own
+ * values proves nothing about the shipped path.
+ *
+ * The town box is freehand, so an operator typing the ZIP they know must not
+ * thereby accuse the business of a mismatch against a listing never consulted.
+ */
+async function urlCandidateRunEndToEnd() {
+  const NAP = require(path.join(ROOT, 'dist/main/main/checks/nap-consistency.js'));
+  const FU = require(path.join(ROOT, 'dist/main/main/discovery/from-url.js'));
+
+  // The site states a different postal code, name, street and phone.
+  const html =
+    '<script type="application/ld+json">' +
+    JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'LocalBusiness',
+      name: 'Harbor Lane Trading Co',
+      telephone: '(555) 010-9999',
+      address: { '@type': 'PostalAddress', streetAddress: '900 Mill St', postalCode: '12345' },
+    }) +
+    '</script><p>Harbor Lane Trading Co, 900 Mill St. Call (555) 010-9999.</p>';
+
+  const built = FU.candidateFromUrl({
+    url: 'https://example-boutique.test/',
+    name: 'Example Boutique',
+    town: 'Rockport, ME 00000',
+  });
+  eq('a town carrying a ZIP still builds a candidate', built.ok, true);
+
+  const ctx = {
+    candidate: built.data,
+    scanId: 'url-scan',
+    evidenceRoot: '(unused)',
+    agent: { run: async () => ({ ok: false, text: '' }) },
+    fetch: async () => ({ body: html, ref: { httpStatus: 200, truncated: false } }),
+  };
+  const finding = await NAP.napConsistencyCheck.run(ctx);
+  const said = `${finding.headline} ${finding.detail} ${finding.unverifiedNote ?? ''}`;
+
+  eq('a typed town carrying a ZIP produces no mismatch', finding.severity, 0);
+  eq('and no variant claims a mismatch', String(finding.variant ?? '').includes('mismatch'), false);
+  eq('and nothing in the finding cites a Google listing',
+    /Google lists|Google listing|Google Business/i.test(said), false);
+  eq('every aspect reports no reference rather than a comparison',
+    Object.values(NAP.__test.aspectsFor(html, built.data)).map((a) => a.state).sort(),
+    ['no-reference', 'no-reference', 'no-reference', 'no-reference']);
+}
+
 // --- report -----------------------------------------------------------------
 // The exit code is set pessimistic BEFORE the async tail. If the awaited work
 // ever hangs, Node drains the event loop and exits without running the report,
 // and the default code of 0 would convert every recorded failure above into a
 // silent PASS. Only the report line below may declare success.
 process.exitCode = 1;
-napRunEndToEnd()
-  .catch((err) => failures.push(`nap run() end-to-end threw\n      ${err && err.stack ? err.stack : err}`))
+Promise.resolve()
+  .then(napRunEndToEnd)
+  .then(urlCandidateRunEndToEnd)
+  .catch((err) => failures.push(`an end-to-end run threw\n      ${err && err.stack ? err.stack : err}`))
   .then(() => {
     console.log('\n--- PARSER TESTS ---');
     if (failures.length) {

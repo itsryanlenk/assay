@@ -45,8 +45,19 @@ export function businessSlug(
   const parts = candidate.address.split(',').map((p) => p.trim()).filter(Boolean);
   // Places formats as "street, town, ST zip, country". Town is third from the
   // end, and the state is the leading token of the second from the end.
-  const town = parts.length >= 3 ? parts[parts.length - 3] ?? '' : '';
-  const stateZip = parts.length >= 2 ? parts[parts.length - 2] ?? '' : '';
+  // A typed URL carries whatever town the operator entered instead: "Town, ST"
+  // or "Town" alone.
+  let town = '';
+  let stateZip = '';
+  if (parts.length >= 3) {
+    town = parts[parts.length - 3] ?? '';
+    stateZip = parts[parts.length - 2] ?? '';
+  } else if (parts.length === 2) {
+    town = parts[0] ?? '';
+    stateZip = parts[1] ?? '';
+  } else if (parts.length === 1) {
+    town = parts[0] ?? '';
+  }
   const state = stateZip.split(/\s+/)[0] ?? '';
   const place = [town, state].filter(Boolean).map(slugPart).join('-');
 

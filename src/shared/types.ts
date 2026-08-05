@@ -59,7 +59,8 @@ export type Candidate = {
   primaryType: string | null;
   mapsUri: string | null;
   discoveredAt: string;              // ISO 8601
-  source: 'google-places-new';
+  /** Where the candidate came from. A typed URL carries no listing fields. */
+  source: 'google-places-new' | 'operator-url';
 };
 
 export type SearchPlacesRequest = {

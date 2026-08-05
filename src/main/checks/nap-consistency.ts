@@ -328,7 +328,7 @@ function comparePhone(
   if (!placesPhone || phoneKey(placesPhone).length < 7) {
     return {
       state: 'no-reference',
-      detail: 'Phone: the Google listing has no usable phone number on file, so phone could not be cross-checked.',
+      detail: 'Phone: no listing phone number was available, so phone could not be cross-checked.',
     };
   }
   const placesD = phoneKey(placesPhone);
@@ -383,7 +383,7 @@ function compareStreetNumber(
   if (!placesStreetNumber) {
     return {
       state: 'no-reference',
-      detail: "Street number: the Google listing's address has no parseable leading street number, so it could not be cross-checked.",
+      detail: 'Street number: no listing street number was available, so it could not be cross-checked.',
     };
   }
   if (siteStreetJsonLd) {
@@ -413,7 +413,7 @@ function comparePostalCode(
   if (!placesPostalCode) {
     return {
       state: 'no-reference',
-      detail: "Postal code: the Google listing's address has no parseable postal code, so it could not be cross-checked.",
+      detail: 'Postal code: no listing postal code was available, so it could not be cross-checked.',
     };
   }
   if (siteJsonLdPostal) {
@@ -436,7 +436,17 @@ function comparePostalCode(
   };
 }
 
-function compareName(siteNameJsonLd: string | null, normalizedVisibleText: string, placesName: string): AspectResult {
+function compareName(
+  siteNameJsonLd: string | null,
+  normalizedVisibleText: string,
+  placesName: string | null
+): AspectResult {
+  if (!placesName || placesName.trim() === '') {
+    return {
+      state: 'no-reference',
+      detail: 'Name: there is no listing name to cross-check against, so the name was not compared.',
+    };
+  }
   const placesNorm = normalizeName(placesName);
   if (siteNameJsonLd) {
     if (namesMatch(siteNameJsonLd, placesName)) return { state: 'match' };
@@ -567,10 +577,16 @@ function verdicts(a: Aspects, candidate: Candidate, placesPostalCode: string | n
   }
 
   if (out.length === 0) {
+    // "They agree" needs two sides. With nothing to compare against, saying so
+    // credits a listing that was never read.
+    const compared = [a.phone, a.street, a.postal, a.name].filter((x) => x.state !== 'no-reference');
     out.push({
       severity: 0,
       status: 'ok',
-      detail: "Name, address and phone found on the business's own site agree with the Google Business listing.",
+      detail:
+        compared.length === 0
+          ? 'There was no listing to cross-check against, so name, address and phone were not compared.'
+          : "Name, address and phone found on the business's own site agree with the Google Business listing.",
     });
   }
 
@@ -579,6 +595,32 @@ function verdicts(a: Aspects, candidate: Candidate, placesPostalCode: string | n
 
 function worst(list: Verdict[]): Verdict {
   return list.reduce((a, b) => (b.severity > a.severity ? b : a));
+}
+
+/**
+ * What the Google listing says about this business, or nulls.
+ *
+ * A typed candidate has no listing. Its name and town came from the operator,
+ * and reading them as Google's turns a typo into an accusation: a town entered
+ * as "Rockport, ME 00000" made extractPostalCode produce a severity-4 postal
+ * mismatch citing a listing nobody consulted. Provenance decides, and anything
+ * that is not a Places result is treated as no listing at all.
+ */
+function listingFor(candidate: Candidate): {
+  name: string | null;
+  phone: string | null;
+  streetNumber: string | null;
+  postalCode: string | null;
+} {
+  if (candidate.source !== 'google-places-new') {
+    return { name: null, phone: null, streetNumber: null, postalCode: null };
+  }
+  return {
+    name: candidate.name,
+    phone: candidate.phone,
+    streetNumber: leadingStreetNumber(candidate.address),
+    postalCode: extractPostalCode(candidate.address),
+  };
 }
 
 /**
@@ -597,24 +639,25 @@ function aspectsFor(html: string, candidate: Candidate): Aspects {
     ? addressFields(business)
     : { streetAddress: null, postalCode: null };
   const visible = visibleText(html);
+  const listing = listingFor(candidate);
   return {
     phone: comparePhone(
       business ? stringField(business, 'telephone') : null,
       digitsOnly(html),
-      candidate.phone,
+      listing.phone,
       visible,
       html
     ),
     street: compareStreetNumber(
       rawStreet ? leadingStreetNumber(rawStreet) : null,
       visible,
-      leadingStreetNumber(candidate.address)
+      listing.streetNumber
     ),
-    postal: comparePostalCode(sitePostalJsonLd, visible, extractPostalCode(candidate.address)),
+    postal: comparePostalCode(sitePostalJsonLd, visible, listing.postalCode),
     name: compareName(
       business ? stringField(business, 'name') : null,
       normalizeForSearch(visible),
-      candidate.name
+      listing.name
     ),
   };
 }
@@ -676,7 +719,7 @@ export const napConsistencyCheck: FlawCheck = {
     }
 
     const aspects = aspectsFor(html, ctx.candidate);
-    const placesPostalCode = extractPostalCode(ctx.candidate.address);
+    const placesPostalCode = listingFor(ctx.candidate).postalCode;
 
     const all = verdicts(aspects, ctx.candidate, placesPostalCode);
     const verdict = worst(all);
