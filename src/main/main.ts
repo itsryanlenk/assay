@@ -208,9 +208,16 @@ function attachSmokeTest(win: BrowserWindow): void {
              // and failed the moment the operator generated a real packet,
              // which is a test that measures the ledger rather than the view.
              base.approvalsRows = document.querySelectorAll('.rail-item').length;
+             // Three correct states, not two: the empty-state line, a visible
+             // queue, or an all-archived rail collapsed to its ARCHIVED BY YOU
+             // toggle. The third was missing, so this probe passed on every
+             // clean data root and failed on the operator's own machine the
+             // day every real row was decided and filed. A probe that cannot
+             // recognize a legitimate state is the bug, not the state.
              base.approvalsRendered =
                (document.querySelector('#approvals-status')?.textContent || '').includes('NOTHING IS WAITING') ||
-               (!document.querySelector('#counter').hidden && base.approvalsRows > 0);
+               (!document.querySelector('#counter').hidden && base.approvalsRows > 0) ||
+               document.querySelector('.rail-archived-toggle') !== null;
              document.querySelector('.app-nav .btn[data-view="scan"]').click();
              base.scanReturns = shown('#view-scan');
              // The one new egress path, driven end to end: an <img> through
