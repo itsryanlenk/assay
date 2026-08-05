@@ -1,4 +1,8 @@
+[![Assay: a local-first desktop tool that grades a business's own page source for AI readiness](.github/media/banner.png)](https://ryanlenk.com/pages/assay)
+
 # Assay
+
+![Assay running: candidate discovery on a map, then the two settings screens that put the operator's name, reply-to address and accent colour on the generated document](.github/media/assay-demo.gif)
 
 Assay is a desktop tool for SEO, GEO and AEO consulting work. It reads the
 machine-readable signals that AI crawlers and assistants rely on when they
@@ -10,7 +14,7 @@ about a business. It measures what that business publishes for one to read.
 
 **The scoring instrument is calibrated against two delivered client scans,
 which between them publish three scored properties, and nothing else.** That is
-a small set. `scripts/test-instrument.js` fails the build if the instrument
+a small set. `scripts/test-instrument.js` fails `npm test` if the instrument
 stops reproducing those three scores. Limitations, near the bottom, covers both
 at length.
 
@@ -189,7 +193,7 @@ Two gates and six suites:
   and with its refusals, and drives the approvals UI through real clicks.
 - parsers, instrument calibration, confirmation gate, packet generation and
   approval queue cover the engine. The calibration suite
-  fails the build if the instrument stops reproducing the three published
+  fails `npm test` if the instrument stops reproducing the three published
   scores, and it pins the agent CLI lockout flags.
 
 `npm run typecheck` runs `tsc --noEmit`. `npm run preview` renders the UI to a
@@ -209,7 +213,7 @@ PNG without spending a Places request.
 - The AI-readiness instrument is calibrated against two delivered client
   scans, which between them publish three scored properties, and nothing
   else. That is a small calibration set. `scripts/test-instrument.js`
-  fails the build if the instrument stops reproducing those three scores.
+  fails `npm test` if the instrument stops reproducing those three scores.
 - Page discovery is best-effort. The sitemap named in robots.txt is read
   first, then the conventional path, then same-origin links from the homepage.
   A site that hides its pages behind JavaScript will still be read as one page,

@@ -4,3 +4,8 @@
 # no business name, address, phone number or key is in it, pixels included.
 assets/icon.ico
 assets/icon.png
+# README media, eyeballed 2026-08-05: every candidate name, website and phone
+# in the demo frames carries a redaction bar; the only personal data shown is
+# the operator's own public contact details.
+.github/media/banner.png
+.github/media/assay-demo.gif
