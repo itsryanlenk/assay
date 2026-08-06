@@ -20,9 +20,11 @@ export type UrlCandidateRequest = {
  * Adds https when the operator omits a scheme. Returns null on anything
  * unparseable.
  *
- * The scheme test requires the `//`, because `example.test:8080` and
- * `user:pw@example.test` both look like a scheme to a bare colon check and
- * came back refused as "a example.test: address".
+ * The scheme test requires either `//` or a non-numeric first character after
+ * the colon, because `example.test:8080` looked like a scheme to a bare colon
+ * check and came back refused as "a example.test: address". A bare
+ * `user:pw@example.test` still reads as a scheme and is refused; with a scheme
+ * in front it gets the credentials message below.
  */
 function parseUrl(raw: string): URL | null {
   const trimmed = raw.trim();

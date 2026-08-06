@@ -758,6 +758,43 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
       /"streetAddress": "170 Harbor Rd"/.test(cleanKit), 'no streetAddress in the @graph');
   }
 
+  // --- a typed candidate has no Google profile, and the kit may not say it does
+  /**
+   * Found by the pre-merge review. The check layer stops a typed candidate
+   * from producing a listing comparison; the kit is a layer further out and
+   * was still sourcing the operator's own typed name, URL and town to "your
+   * Google Business Profile listing" on a free-tier client document.
+   */
+  {
+    const SK = require(path.join(ROOT, 'dist/main/main/packet/render/schema-kit.js'));
+    const typed = {
+      ...candidate,
+      name: 'Example Boutique',
+      address: 'Rockport, ME',
+      phone: null,
+      rating: null,
+      reviewCount: null,
+      primaryType: null,
+      source: 'operator-url',
+    };
+    const kit = SK.schemaKitRenderer({
+      candidate: typed, findings: [confirmedFinding], score: null, date: '2026-08-05', operator,
+    }).text;
+    ok('a typed candidate is never sourced to a Google profile',
+      !/Google Business Profile|Google listing/i.test(kit),
+      (kit.match(/.*Google (Business Profile|listing).*/i) || [''])[0]);
+    ok('and the kit says where those facts really came from',
+      /you gave us|you typed|address you gave/i.test(kit), '(no operator-provenance wording)');
+
+    // A Places candidate keeps its real provenance wording.
+    const placesKit = SK.schemaKitRenderer({
+      candidate: { ...candidate, source: 'google-places-new' },
+      findings: [confirmedFinding], score: null, date: '2026-08-05', operator,
+    }).text;
+    ok('a Places candidate still names the profile it came from',
+      /Google Business Profile listing/.test(placesKit), '(Places provenance lost)');
+  }
+
   // --- the closing ask: the house pitch, the operator's words, or nothing ---
   /**
    * The scorecard's closing ask is now an operator setting. askMode 'default'

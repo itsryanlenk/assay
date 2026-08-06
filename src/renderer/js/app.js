@@ -374,7 +374,10 @@ async function runScan(append) {
 
   const data = res.data;
   if (!append) {
-    state.candidates = [];
+    // Typed rows are the only ones in the table that cannot be recovered by
+    // repeating the query, so a fresh area search keeps them.
+    const typed = state.candidates.filter((c) => c.source === 'operator-url');
+    state.candidates = typed;
     state.scanId = newScanId();
     // A fresh scan is a fresh area; the map re-frames its new pins.
     if (window.assayMap) window.assayMap.resetView();
@@ -406,6 +409,13 @@ async function runScan(append) {
  * Nothing is fetched here; CHECK does that, through the same policy gate.
  */
 async function addUrlCandidate() {
+  // An area search in flight ends by replacing state.candidates wholesale, so
+  // a row added during one is discarded the moment it resolves.
+  if (state.busy) {
+    setStatus('error', 'BUSY', 'A search is running. Wait for it to finish, then add the address.');
+    return;
+  }
+
   const url = $('#f-url').value.trim();
   const name = $('#f-url-name').value.trim();
   const town = $('#f-url-town').value.trim();
@@ -433,25 +443,38 @@ async function addUrlCandidate() {
   const candidate = res.data;
   if (state.scanId === null) state.scanId = newScanId();
 
-  // One row per site. Re-adding a site replaces its row rather than stacking.
+  // One row per host. Re-adding replaces, and says so: the replaced row takes
+  // its findings panel with it, and doing that in silence loses work.
   const at = state.candidates.findIndex((c) => c.placeId === candidate.placeId);
+  let replaced = null;
   if (at === -1) {
     state.candidates.push(candidate);
+    clearStatus();
   } else {
-    // One row per host. Replacing silently would delete the previous
-    // business's row and its findings panel with no message.
-    const previous = state.candidates[at];
+    replaced = state.candidates[at];
     state.candidates[at] = candidate;
-    if (previous.name !== candidate.name) {
-      setStatus('working', 'REPLACED', `${previous.name} and ${candidate.name} share the host ${candidate.placeId.slice(4)}, so this row now holds ${candidate.name}.`);
-    }
   }
 
-  state.nextPageToken = null;
-  clearStatus();
-  $('#results-note').textContent = `${state.candidates.length} added by hand`;
-  $('#quota-detail').textContent = '';
+  // state.nextPageToken is left alone: the pages of an area search are already
+  // paid for, and adding a row by hand should not put them out of reach.
+  // Counts only what this door added. The table can also hold Places rows,
+  // and the billing line beside it belongs to them.
+  const typed = state.candidates.filter((c) => c.source === 'operator-url').length;
+  $('#results-note').textContent =
+    typed === state.candidates.length
+      ? `${typed} added by hand`
+      : `${state.candidates.length} candidates, ${typed} added by hand`;
   renderResults(false);
+
+  if (replaced) {
+    setStatus(
+      'working',
+      'REPLACED',
+      `${candidate.placeId.slice(4)} was already in the table${
+        replaced.name === candidate.name ? '' : ` as ${replaced.name}`
+      }, so that row now holds ${candidate.name}. Anything checked on it was cleared.`
+    );
+  }
 
   $('#f-url').value = '';
   $('#f-url-name').value = '';

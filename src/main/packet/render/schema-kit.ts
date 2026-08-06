@@ -103,6 +103,28 @@ function findByCheck(findings: FlawFinding[], id: FlawFinding['checkId']): FlawF
 }
 
 /**
+ * Where this candidate's facts came from, in the words the kit prints.
+ *
+ * A typed candidate has no Google Business Profile. Sourcing the operator's
+ * own typed name and address to one puts a fabricated attribution on a
+ * free-tier document the prospect receives. Found by the pre-merge review.
+ */
+function provenance(candidate: Candidate): { source: string; theSource: string; hasListing: boolean } {
+  if (candidate.source !== 'google-places-new') {
+    return {
+      source: 'the details you gave us when you started this scan',
+      theSource: 'what you gave us',
+      hasListing: false,
+    };
+  }
+  return {
+    source: 'your Google Business Profile listing',
+    theSource: 'that listing',
+    hasListing: true,
+  };
+}
+
+/**
  * Facts this packet itself disputes.
  *
  * A nap-consistency mismatch carries the disputed digits in its own detail,
@@ -313,6 +335,7 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   const addr = parseAddress(candidate.address);
   const disputed = disputedFacts(findings);
   const { graph, phoneIncluded, addressIncluded } = buildGraph(candidate, origin, schemaType, addr, measured, disputed);
+  const prov = provenance(candidate);
 
   const categoryWords = stemTerms(candidate.primaryType, candidate.name);
   const categoryLabel = categoryWords.length ? titleCase(categoryWords) : null;
@@ -335,15 +358,16 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
 
   lines.push(
     `This kit is copy-paste markup, built only from what is already on ${candidate.name}'s own pages and its ` +
-      `Google Business Profile listing. Every block below says where its facts came from. Anything not confirmed ` +
+      `\. Every block below says where its facts came from. Anything not confirmed ` +
       `on ${candidate.name}'s own pages is flagged as needing your confirmation before you paste it, rather than ` +
       'stated as settled.'
   );
   lines.push('');
   lines.push(
     'One rule sits above the rest: do not add `aggregateRating` or `Review` markup about ' +
-      `${candidate.name} to any of this, even though the Google listing hands over a rating and a review count ` +
-      'that would be easy to turn into schema. Self-authored review markup does not qualify for rich results, and ' +
+      `${candidate.name} to any of this` +
+      (prov.hasListing ? ', even though the listing hands over a rating and a review count' : '') +
+      '. Self-authored review markup does not qualify for rich results, and ' +
       'it is the schema type most likely to draw a manual action. None of the blocks below include it, and none ' +
       'should. If a developer or a template ever suggests it, decline.'
   );
@@ -361,7 +385,7 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   lines.push('');
   lines.push('Provenance:');
   lines.push('');
-  lines.push('- `name`: your Google Business Profile listing.');
+  lines.push(`- \`name\`: ${prov.source}.`);
   lines.push(
     // Say plainly when the type is a floor rather than a fact. The listing's
     // category is a taxonomy bucket, and publishing it as a claim about the
@@ -370,28 +394,35 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
     typeIsGuess(candidate.primaryType)
       ? `- \`@type\` (\`${schemaType}\`): a safe floor, not a finding. ` +
         (candidate.primaryType
-          ? `The category on your listing ("${candidate.primaryType}") is an umbrella that does not name a trade, so nothing narrower could be read from it. `
-          : 'No category is on the listing at all, so nothing narrower could be read from it. ') +
+          ? `The category on ${prov.theSource} ("${candidate.primaryType}") is an umbrella that does not name a trade, so nothing narrower could be read from it. `
+          : `No category came with ${prov.theSource} at all, so nothing narrower could be read from it. `) +
         'Pick the closest type from the list at schema.org/LocalBusiness and swap it in. Being specific here is worth more than anything else in this block.'
-      : `- \`@type\` (\`${schemaType}\`): mapped from the category on that same listing ("${candidate.primaryType}" on the listing).`
+      : `- \`@type\` (\`${schemaType}\`): mapped from the category on ${prov.theSource} ("${candidate.primaryType}").`
   );
-  if (origin) lines.push('- `url`: the website field on that listing.');
+  if (origin) {
+    lines.push(
+      `- \`url\`: ${prov.hasListing ? 'the website field on that listing' : 'the address you gave us'}.`
+    );
+  }
   lines.push(
     phoneIncluded
-      ? '- `telephone`: your Google Business Profile listing.'
+      ? `- \`telephone\`: ${prov.source}.`
       : disputed.phone
-        ? '- `telephone`: left out. This scan found the number on your Google listing and the number on ' +
+        ? '- `telephone`: left out. This scan found the number on your listing and the number on ' +
             'your own site disagree, and pasting either would take a side. The scorecard names both. Settle ' +
             'which is right, fix the wrong one, then add the survivor here.'
-        : '- `telephone`: left out. Your Google Business Profile lists a number for you, but this scan\'s ' +
-            'confirmed findings do not independently state it, so it is not pasted in unverified. Add it yourself ' +
-            'once you have checked it against your own page.'
+        : prov.hasListing
+          ? '- `telephone`: left out. Your Google Business Profile lists a number for you, but this scan\'s ' +
+              'confirmed findings do not independently state it, so it is not pasted in unverified. Add it yourself ' +
+              'once you have checked it against your own page.'
+          : '- `telephone`: left out. This scan started from a web address rather than a listing, so it has no ' +
+              'phone number for you. Add your own once you have checked it against your own page.'
   );
   lines.push(
     addressIncluded
-      ? '- `address`: your Google Business Profile listing.'
+      ? `- \`address\`: ${prov.source}.`
       : disputed.address
-        ? '- `address`: left out. This scan found the address on your Google listing and the address on ' +
+        ? '- `address`: left out. This scan found the address on your listing and the address on ' +
             'your own site disagree, and pasting either would take a side. The scorecard names both. Settle ' +
             'which is right, fix the wrong one, then add the survivor here.'
         : '- `address`: left out. This scan\'s confirmed findings do not corroborate the digits, so it is ' +

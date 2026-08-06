@@ -79,7 +79,7 @@
         <label for="f-url-name">Business name</label>
         <input id="f-url-name" name="name" type="text" placeholder="Example Boutique" required>
       </div>
-      <div class="field field--grow" data-tip="Optional. Names the client folder, like Rockport-ME. It is a label: no check compares it to anything, and a typed address is never treated as a listing.">
+      <div class="field field--grow" data-tip="Optional. Names the client folder, like Rockport-ME. It is a label: no check compares it to anything, and no artifact sources it to a Google listing you do not have.">
         <label for="f-url-town">Town (optional)</label>
         <input id="f-url-town" name="town" type="text" placeholder="Rockport, ME">
       </div>
@@ -145,7 +145,7 @@
                 data-tip="Fetch the next page of candidates for the same query. One more billed Places request.">Load more</button>
         <div class="results-footer__notes">
           <p class="results-footer__law mono">
-            EVERY ROW CAME FROM THE PLACES API. NO MAPS HTML WAS READ.
+            EVERY ROW CAME FROM THE PLACES API OR FROM AN ADDRESS YOU TYPED. NO MAPS HTML WAS READ.
           </p>
           <p class="results-footer__billing" id="quota-detail"></p>
         </div>
@@ -327,9 +327,9 @@
         <li><b>1 · Find.</b> On <b>Scan</b>, either enter a city and a category and pull
           candidates from the Google Places API, or switch to <b>Scan a URL</b> and type the
           address of a business you already know, which needs no key. No Maps HTML is
-          scraped either way. A typed address carries no listing at all, so the checks that
-          compare a site against its listing record that they had nothing to compare and can
-          never report a mismatch.</li>
+          scraped either way. A typed address carries no listing at all, so the NAP check
+          records that it had nothing to compare and can never report a mismatch, and the
+          schema kit says the facts came from you rather than from a listing.</li>
         <li><b>2 · Check.</b> Press <b>Check</b> on a candidate to run the six flaw checks against
           its own fetched page source. Findings come back <b>REMOTE</b>: real, logged, and not
           yet safe to send.</li>

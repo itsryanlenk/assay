@@ -54,7 +54,11 @@ export function businessSlug(
     stateZip = parts[parts.length - 2] ?? '';
   } else if (parts.length === 2) {
     town = parts[0] ?? '';
-    stateZip = parts[1] ?? '';
+    // Only a real "ST" or "ST 12345" tail is a state. Taking the first token
+    // unconditionally truncated whole place names: "Central, Hong Kong" became
+    // Central-Hong and "Rockport, New Hampshire" became Rockport-New.
+    stateZip = /^[A-Z]{2}(\s+\d{5}(-\d{4})?)?$/.test(parts[1] ?? '') ? (parts[1] ?? '') : '';
+    if (!stateZip) town = parts.join(' ');
   } else if (parts.length === 1) {
     town = parts[0] ?? '';
   }

@@ -11,10 +11,10 @@ into a document the owner can act on.
 
 ## What you need to run it
 
-Node 20 or newer, and nothing else. `.nvmrc` pins 20. Type a web address on
-the scan screen and the six checks run and score it: no account, no API key,
-no billing. Both credentials below buy something extra, and neither gates the
-engine.
+Node 20 or newer, and no account of any kind. `.nvmrc` pins 20. Type a web
+address on the scan screen and the six checks run and score it: no API key, no
+billing, no sign-up. Both credentials below buy something extra, and neither
+gates the engine.
 
 Verified on Windows 11 with Node 22.14.0. The macOS and Linux code paths are
 written and nobody has run them yet; if you try one, the result is worth an
@@ -40,8 +40,9 @@ npm test
 npm start
 ```
 
-That fourth line is required, and it is the first thing that stops a fresh
-clone. `.scrub-terms` holds the client and operator names the publish gate
+That fourth line is what `npm test` needs, and it is the first thing that stops
+a fresh clone. `npm start` runs without it.
+`.scrub-terms` holds the client and operator names the publish gate
 scans for. It is untracked on purpose, so it never travels with a clone, and
 preflight refuses to run without it rather than report a pass for a scan that
 checked nothing. Declaring an empty list is what the line above does.

@@ -1487,6 +1487,18 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
     P.businessSlug(town.data), 'Rockport-ME__Example-Boutique');
   eq('no town still produces a folder',
     P.businessSlug(a.data), 'Unknown-Location__X');
+  // Found by the pre-merge review: taking the first token of the second part
+  // truncated multi-word place names, and the town box is freehand.
+  eq('a two-word state is not truncated',
+    P.businessSlug({ name: 'X', address: 'Rockport, New Hampshire' }), 'Rockport-New-Hampshire__X');
+  eq('a foreign two-part place keeps both words',
+    P.businessSlug({ name: 'X', address: 'Central, Hong Kong' }), 'Central-Hong-Kong__X');
+  eq('a real state code still reads as a state',
+    P.businessSlug({ name: 'X', address: 'Rockport, ME' }), 'Rockport-ME__X');
+  eq('a state code with a ZIP still reads as a state',
+    P.businessSlug({ name: 'X', address: 'Rockport, ME 00000' }), 'Rockport-ME__X');
+  eq('the Places four-part shape is untouched',
+    P.businessSlug({ name: 'X', address: '12 Main St, Rockport, ME 00000, USA' }), 'Rockport-ME__X');
 
   /**
    * The false-accusation guard. With no listing to compare against, every NAP
