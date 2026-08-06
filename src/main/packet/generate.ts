@@ -342,7 +342,7 @@ export async function generatePacket(
    * 'prepared', and it refuses to downgrade an artifact the operator has
    * already ruled on, so regenerating a packet cannot reset a decision.
    */
-  const queue = prepare(req.outputRoot, slug, date, artifacts, req.candidate.name);
+  const queue = prepare(req.outputRoot, slug, date, artifacts, req.candidate.name, req.candidate.placeId);
 
   return { slug, date, draftsDir: paths.drafts, artifacts, queue };
 }

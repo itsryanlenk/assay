@@ -392,6 +392,69 @@ ok('the ledger is usable again after being restored',
   ok('an artifact kind the re-scan did not produce is left alone',
     kitRow && kitRow.state === 'prepared', kitRow && kitRow.state);
 
+/**
+ * The same prospect under a CHANGED SLUG.
+ *
+ * The sweep above scoped itself with `row.slug !== slug`, and the slug is
+ * derived from mutable text: the business name, the town, and the contact
+ * name that businessSlug appends. Add a contact on the second run, correct a
+ * typo in the name, or fill in the town on a URL scan, and the same business
+ * gets a new slug. Every earlier row then sits outside the sweep, so an
+ * approved artifact from the old folder stays approved and stays sendable
+ * while a newer scan of the same business exists. That is exactly the state
+ * superseding was written to make impossible.
+ *
+ * placeId identifies the prospect and does not move when the display text
+ * does. Rows carry it, and the sweep matches on it.
+ */
+{
+  const R3 = fs.mkdtempSync(path.join(os.tmpdir(), 'reslug-'));
+  const D3 = path.join(R3, 'drafts');
+  fs.mkdirSync(D3, { recursive: true });
+  const mk3 = (name) => {
+    const p = path.join(D3, name);
+    fs.writeFileSync(p, `bytes of ${name}`, 'utf8');
+    return p;
+  };
+
+  const PLACE = 'url:example-boutique.test';
+  const SLUG_A = 'Unknown-Location__Example-Boutique';
+  const SLUG_B = 'Rockport-ME__Example-Boutique';
+  const CARD_A = 'Example-Boutique__Scorecard__2026-08-04.pdf';
+  const CARD_B = 'Example-Boutique__Scorecard__2026-08-05.pdf';
+
+  A.prepare(R3, SLUG_A, '2026-08-04',
+    [{ kind: 'Scorecard', filename: CARD_A, absolutePath: mk3(CARD_A) }],
+    'Example Boutique', PLACE);
+  const idA = A.itemIdFor(SLUG_A, '2026-08-04', CARD_A);
+  A.approve(R3, idA, confirmed, fresh);
+  ok('SETUP: the first packet is approved and sendable',
+    A.tokenFor(R3, idA, confirmed, fresh) !== null);
+
+  // Second run, same business, town filled in. New slug, new folder.
+  const after3 = A.prepare(R3, SLUG_B, '2026-08-05',
+    [{ kind: 'Scorecard', filename: CARD_B, absolutePath: mk3(CARD_B) }],
+    'Example Boutique', PLACE);
+
+  const rowA = after3.find((r) => r.itemId === idA);
+  ok('a re-slug still supersedes the packet it replaces',
+    rowA && rowA.state === 'superseded', rowA && rowA.state);
+  ok('and the superseded row can no longer be sent',
+    A.tokenFor(R3, idA, confirmed, fresh) === null);
+
+  // A different prospect on the same date is untouched.
+  const OTHER = 'Other-Co__Scorecard__2026-08-05.pdf';
+  A.prepare(R3, 'Town-ST__Other-Co', '2026-08-05',
+    [{ kind: 'Scorecard', filename: OTHER, absolutePath: mk3(OTHER) }],
+    'Other Co', 'url:other.test');
+  const afterOther = A.prepare(R3, SLUG_B, '2026-08-06',
+    [{ kind: 'Scorecard', filename: 'Example-Boutique__Scorecard__2026-08-06.pdf', absolutePath: mk3('Example-Boutique__Scorecard__2026-08-06.pdf') }],
+    'Example Boutique', PLACE);
+  const otherRow = afterOther.find((r) => r.itemId === A.itemIdFor('Town-ST__Other-Co', '2026-08-05', OTHER));
+  ok('another prospect is never superseded by this one',
+    otherRow && otherRow.state === 'prepared', otherRow && otherRow.state);
+  }
+
   // The rule this sits next to still holds: regenerating the IDENTICAL
   // artifact preserves the operator's ruling on it.
   const newCardId = A.itemIdFor(SLUG, NEW_DATE, NEW_CARD);

@@ -106,6 +106,20 @@ export type QueueItem = {
    * safe direction.
    */
   candidateName?: string;
+  /**
+   * Which prospect this row belongs to, independent of what it is called.
+   *
+   * `slug` cannot answer that. It is built from the business name, the town
+   * and the contact name, all of which the operator can change between runs,
+   * and the supersede sweep scoped itself by slug. Fill in a town, fix a typo
+   * or add a contact, and every earlier row fell outside the sweep: an
+   * approved artifact stayed approved and stayed sendable while a newer scan
+   * of the same business existed.
+   *
+   * Optional because rows written before this field existed do not have it;
+   * the sweep falls back to slug for those, which is what it always did.
+   */
+  placeId?: string;
   filename: string;
   absolutePath: string;
   state: ApprovalState;
@@ -323,7 +337,8 @@ export function prepare(
   slug: string,
   date: string,
   artifacts: { kind: ArtifactKind; filename: string; absolutePath: string }[],
-  candidateName?: string
+  candidateName?: string,
+  placeId?: string
 ): QueueItem[] {
   const existing = loadQueue(root);
   const byId = new Map(existing.map((i) => [i.itemId, i]));
@@ -340,6 +355,7 @@ export function prepare(
       kind: a.kind,
       slug,
       ...(candidateName ? { candidateName } : {}),
+      ...(placeId ? { placeId } : {}),
       filename: a.filename,
       absolutePath: a.absolutePath,
       state: 'prepared',
@@ -367,8 +383,16 @@ export function prepare(
   const replacementFor = new Map<ArtifactKind, string>();
   for (const a of artifacts) replacementFor.set(a.kind, itemIdFor(slug, date, a.filename));
 
+  /**
+   * The same prospect, whatever it is currently called. Matching on placeId
+   * when both rows carry one catches a re-slug; the slug comparison stays for
+   * rows written before placeId existed, so this only ever widens the sweep.
+   */
+  const samePros = (row: QueueItem): boolean =>
+    (!!placeId && !!row.placeId && row.placeId === placeId) || row.slug === slug;
+
   for (const row of byId.values()) {
-    if (row.slug !== slug) continue;
+    if (!samePros(row)) continue;
     if (row.state === 'rejected' || row.state === 'superseded') continue;
     const replacement = replacementFor.get(row.kind);
     if (!replacement || replacement === row.itemId) continue;
