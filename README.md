@@ -9,6 +9,48 @@ machine-readable signals that AI crawlers and assistants rely on when they
 answer a question about a local business, scores them, and turns the result
 into a document the owner can act on.
 
+## What you need to run it
+
+Verified on Windows 11 with Node 22.14.0. The macOS and Linux code paths are
+written and nobody has run them yet; if you try one, the result is worth an
+issue either way.
+
+- Node 20 or newer. `.nvmrc` pins 20.
+- A Google Places API key, with Places API (New) enabled and billing active on
+  the Google Cloud project. Discovery is the only way a business enters the
+  app, so without a key the scan screen says so and stops there. Each search is
+  one billed request at Text Search Enterprise rates, and each Load more is
+  another.
+- The `claude` CLI, installed and logged in. Optional. Every score, severity,
+  count and evidence hash is computed before a model is involved, so with no
+  CLI on PATH the six checks still run and still produce a scored result. What
+  you lose is the rewording: each finding falls back to its deterministic
+  sentence, which is blunter and equally true.
+
+```
+git clone https://github.com/itsryanlenk/assay
+cd assay
+npm ci
+echo "# no operator terms on this machine" > .scrub-terms
+npm test
+npm start
+```
+
+That fourth line is required, and it is the first thing that stops a fresh
+clone. `.scrub-terms` holds the client and operator names the publish gate
+scans for. It is untracked on purpose, so it never travels with a clone, and
+preflight refuses to run without it rather than report a pass for a scan that
+checked nothing. Declaring an empty list is what the line above does.
+
+On Windows PowerShell, write it with
+`Set-Content -Encoding utf8 .scrub-terms '# no operator terms on this machine'`.
+Redirection there can produce UTF-16, which preflight reads as garbage terms
+and reports as leaks in files you have not touched.
+
+`npm test` runs the app in a real window at stage two of eight. On a headless
+Linux box that wants `xvfb-run npm test`, which is unverified like the rest of
+Linux.
+
 **It does not observe AI search.** Nothing here watches what an assistant says
 about a business. It measures what that business publishes for one to read.
 
@@ -112,7 +154,9 @@ document.
 
 ## Setup
 
-Requires Node 20+ and Windows, macOS or Linux.
+Node 20 or newer, on Windows. See [What you need to run it](#what-you-need-to-run-it)
+for the Places key, the optional `claude` CLI, and the one line a fresh clone
+needs before `npm test` will run.
 
 ```bash
 npm install
