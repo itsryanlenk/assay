@@ -11,21 +11,25 @@ into a document the owner can act on.
 
 ## What you need to run it
 
+Node 20 or newer, and nothing else. `.nvmrc` pins 20. Type a web address on
+the scan screen and the six checks run and score it: no account, no API key,
+no billing. Both credentials below buy something extra, and neither gates the
+engine.
+
 Verified on Windows 11 with Node 22.14.0. The macOS and Linux code paths are
 written and nobody has run them yet; if you try one, the result is worth an
 issue either way.
 
-- Node 20 or newer. `.nvmrc` pins 20.
 - A Google Places API key, with Places API (New) enabled and billing active on
-  the Google Cloud project. Discovery is the only way a business enters the
-  app, so without a key the scan screen says so and stops there. Each search is
-  one billed request at Text Search Enterprise rates, and each Load more is
-  another.
-- The `claude` CLI, installed and logged in. Optional. Every score, severity,
-  count and evidence hash is computed before a model is involved, so with no
-  CLI on PATH the six checks still run and still produce a scored result. What
-  you lose is the rewording: each finding falls back to its deterministic
-  sentence, which is blunter and equally true.
+  the Google Cloud project. It buys area search: a city and a category, and a
+  table of candidates you did not already know about, each carrying the listing
+  fields the two cross-check checks compare against. Each search is one billed
+  request at Text Search Enterprise rates, and each Load more is another.
+- The `claude` CLI, installed and logged in. It buys the plain-English
+  rewording of each verdict. Every score, severity, count and evidence hash is
+  computed before a model is involved, so with no CLI on PATH the six checks
+  still run and still produce a scored result. Each finding falls back to its
+  deterministic sentence, which is blunter and equally true.
 
 ```
 git clone https://github.com/itsryanlenk/assay
