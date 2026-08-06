@@ -122,8 +122,9 @@ operations only.
 **What this actually grants, stated the unflattering way.** The agent inside
 this app cannot fetch, browse or search; it takes text
 and returns text. An outside agent calling a `scan` tool gets *more* than that,
-because handing Assay a URL causes a fetch. It would spend the operator's
-metered Places quota and put the operator's IP behind the request. The existing
+because handing Assay a URL causes a fetch, and since the URL door landed that
+fetch costs nothing and needs no key, which removes the one thing that used to
+cap the volume. It puts the operator's IP behind every request. The existing
 guard refuses private and loopback addresses, and it does nothing about being
 pointed at arbitrary public sites all day.
 
@@ -144,7 +145,9 @@ the assistants can run themselves closes the loop.
 - a wider calibration set for the AI-readiness instrument, which is calibrated
   against two delivered client scans, publishing three scored properties
   between them, and nothing else
-- discovery that does not depend on Google Places
+- discovery that does not depend on Google Places. Typing a web address is the
+  first half and it ships today; what is still missing is a way to FIND a
+  business you cannot already name
 - confirmations that survive a restart and display their own age. They expire
   after 72 hours today and are gone when the app closes, which the README calls
   deliberate, and it is: the reason to revisit it is the age display, not the
