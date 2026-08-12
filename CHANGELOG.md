@@ -65,6 +65,12 @@ packet workflow, hardened and audited, but not yet tagged.
 
 ### Fixed
 
+- A perfect score stops recommending a fix. At 100/100 the fix band printed
+  "Biggest single gain is AI crawlers allowed: 0 of 25 points are unclaimed",
+  and the owner page opened every block with the total-absence copy directly
+  above its own "nothing to do here" standing line. No unclaimed points now
+  means no fix band, and a fully earned item leads with where the owner
+  stands instead of an absence claim that stopped being true.
 - A site the crawler could not read no longer strands the operator behind a
   divergence nothing can clear. A divergence takes two measurements: a pass
   that could not read enough to judge abstains, an abstention never voids a

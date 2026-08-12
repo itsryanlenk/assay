@@ -14,7 +14,7 @@
  * split is interpolated rather than observed, it says so.
  */
 
-import { FlawFinding, FlawFix, Severity } from '../../shared/types';
+import { FlawFinding, FlawFix, Score, Severity } from '../../shared/types';
 import {
   InsufficientCaptureError,
   ItemResult,
@@ -701,6 +701,28 @@ function severityFor(rescaled: number): Severity {
   return 0;
 }
 
+/**
+ * The one fix worth naming, from the points still on the table.
+ *
+ * Returns undefined at full marks. The fix band exists to point at work, and
+ * a live 100/100 scan showed what the old always-pick-one version does when
+ * there is none: "Biggest single gain is AI crawlers allowed: 0 of 25 points
+ * are unclaimed", a fix with nothing to fix. No unclaimed points, no band.
+ * Exported for scripts/test-packet.js, which pins both directions.
+ */
+export function recommendedFix(items: Score['items']): FlawFix | undefined {
+  const worstItem = [...items]
+    .filter((i) => !i.na && i.earned < i.possible)
+    .sort((a, b) => b.possible - b.earned - (a.possible - a.earned))[0];
+  if (!worstItem) return undefined;
+  return {
+    summary:
+      `Biggest single gain is ${worstItem.label}: ${worstItem.possible - worstItem.earned} of ` +
+      `${worstItem.possible} points are unclaimed. ${worstItem.note}`,
+    effort: worstItem.id === 'crawler-access' ? 'minutes' : 'an afternoon',
+  };
+}
+
 export const aiReadinessCheck: FlawCheck = {
   id: 'ai-readiness',
   label: 'AI readiness (105-point instrument)',
@@ -1115,16 +1137,7 @@ export const aiReadinessCheck: FlawCheck = {
     }
 
     const severity = severityFor(score.rescaled);
-    const worstItem = [...score.items]
-      .filter((i) => !i.na)
-      .sort((a, b) => b.possible - b.earned - (a.possible - a.earned))[0];
-
-    const fix: FlawFix | undefined = worstItem
-      ? {
-          summary: `Biggest single gain is ${worstItem.label}: ${worstItem.possible - worstItem.earned} of ${worstItem.possible} points are unclaimed. ${worstItem.note}`,
-          effort: worstItem.id === 'crawler-access' ? 'minutes' : 'an afternoon',
-        }
-      : undefined;
+    const fix = recommendedFix(score.items);
 
     // Same-origin pages beyond the homepage that were read and scored. The
     // confirmation UI offers a paste slot for each, so a multi-page site's

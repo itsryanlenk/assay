@@ -564,6 +564,49 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
       '(note gone from the rubric table)');
   }
 
+  // --- a perfect score has nothing to fix and says nothing false ------------
+  // From a live 100/100 self-scan. Two defects, one class: the fix band
+  // printed "Biggest single gain is AI crawlers allowed: 0 of 25 points are
+  // unclaimed", and the owner page opened every block with the total-absence
+  // copy directly above its own "nothing to do here" standing line. Copy that
+  // can only be true below full marks must never print at full marks.
+  {
+    const SCR = require(path.join(ROOT, 'dist/main/main/packet/render/scorecard.js'));
+    const A = require(path.join(ROOT, 'dist/main/main/checks/ai-readiness.js'));
+    const fullItems = [
+      { id: 'crawler-access', label: 'AI crawlers allowed', earned: 25, possible: 25, na: false, note: 'nothing blocked.' },
+      { id: 'llms-txt', label: 'llms.txt', earned: 15, possible: 15, na: false, note: 'Real file, sectioned. Covers every path in the sitemap.' },
+      { id: 'entity-schema', label: 'Entity schema', earned: 20, possible: 20, na: false, note: 'Organization + WebSite + sameAs + founder Person + @id.' },
+      { id: 'faq-page', label: 'FAQPage', earned: 15, possible: 15, na: false, note: 'Marked up, visible, on the page that matters.' },
+      { id: 'product-review', label: 'Product + Review', earned: 15, possible: 15, na: false, note: 'Product or Service node present; Offer with a price present.' },
+      { id: 'plain-words', label: 'Plain-words test', earned: 15, possible: 15, na: false, note: 'Title, description and vocabulary all present.' },
+    ];
+    ok('a perfect score recommends no fix', A.recommendedFix(fullItems) === undefined,
+      JSON.stringify(A.recommendedFix && A.recommendedFix(fullItems)));
+    const gap = A.recommendedFix
+      ? A.recommendedFix(fullItems.map((i) => (i.id === 'faq-page' ? { ...i, earned: 10 } : i)))
+      : undefined;
+    ok('one unclaimed band is still recommended, by name and by the real gap',
+      !!gap && /FAQPage/.test(gap.summary) && /5 of 15/.test(gap.summary), gap && gap.summary);
+
+    const perfect = {
+      instrument: 'aeo-baseline-six-check', instrumentVersion: 't',
+      raw: 105, base: 105, rescaled: 100, naItems: [], markedOut: [], items: fullItems,
+    };
+    const doc = SCR.scorecardRenderer({
+      candidate,
+      findings: [{ ...confirmedFinding, checkId: 'ai-readiness', status: 'ok', severity: 0, fix: undefined, score: perfect }],
+      score: perfect, date: '2026-08-12', operator,
+    }).text;
+    const ownerPage = doc.slice(0, doc.indexOf('<div class="tech-start">'));
+    ok('a perfect owner page never opens with an absence claim',
+      !/turns the AI tools away|no summary file for AI|Nothing in the hidden format/.test(ownerPage),
+      '(absence copy on a perfect owner page)');
+    ok('a perfect owner page says where the owner stands',
+      /Nothing to do here|doing its job/.test(ownerPage), '(no standing line on a perfect owner page)');
+    ok('a perfect scorecard never says unclaimed', !/unclaimed/i.test(doc), '(unclaimed on a perfect card)');
+  }
+
   // --- every printed page carries the header, page one's shape --------------
   /**
    * The chip, the business name and the GENERATED date print at the top of
