@@ -36,6 +36,13 @@
  * Also computed, reported as a note rather than its own severity: whether the
  * phone number Google Places has on file for this business appears anywhere
  * at all in the homepage source, compared on digits only.
+ *
+ * PAGES READ. The homepage, plus the same-origin contact page it links to,
+ * when it links one and that page answers. The check already detects the
+ * contact link, and a check that names the road sign follows it: a live scan
+ * wrote "the only way to reach this business is a link to a contact page"
+ * beside its own capture of that page carrying a tel: link. Every sentence
+ * scopes itself to the pages actually read.
  */
 
 import { Candidate, FlawFinding, FlawFix, Severity } from '../../shared/types';
@@ -227,11 +234,68 @@ function anyContactSignal(s: ContactSignals): boolean {
   );
 }
 
+/** The union of two pages' signals: an extra page can only add channels. */
+function mergeSignals(a: ContactSignals, b: ContactSignals): ContactSignals {
+  return {
+    telNumbers: [...new Set([...a.telNumbers, ...b.telNumbers])],
+    mailtoAddresses: [...new Set([...a.mailtoAddresses, ...b.mailtoAddresses])],
+    hasContactForm: a.hasContactForm || b.hasContactForm,
+    hasContactPageLink: a.hasContactPageLink || b.hasContactPageLink,
+    bookingHosts: [...new Set([...a.bookingHosts, ...b.bookingHosts])],
+    textPhones: [...new Set([...a.textPhones, ...b.textPhones])],
+  };
+}
+
+/**
+ * The first same-origin contact page the homepage links to, absolute.
+ *
+ * The check already detects this link and used to write "the only way to
+ * reach this business is a link to a contact page" while the contact page
+ * itself, captured in the same scan, carried a tel: link. A check that names
+ * the road sign follows it. Same-origin only, www-insensitive, because a
+ * lookalike domain must never be fetched as the business's own site, and one
+ * hop only: this is the page contact information lives on, not a crawl.
+ */
+function contactPageUrl(html: string, base: string): string | null {
+  let origin: URL;
+  try {
+    origin = new URL(base);
+  } catch {
+    return null;
+  }
+  const originHost = origin.hostname.replace(/^www\./i, '').toLowerCase();
+  for (const a of extractAnchors(html)) {
+    if (!a.href || !looksLikeContactLink(a.href, a.text)) continue;
+    const href = a.href.trim();
+    if (/^(mailto|tel|javascript|#)/i.test(href)) continue;
+    let resolved: URL;
+    try {
+      resolved = new URL(href, origin.origin);
+    } catch {
+      continue;
+    }
+    if (resolved.protocol !== 'https:' && resolved.protocol !== 'http:') continue;
+    if (resolved.hostname.replace(/^www\./i, '').toLowerCase() !== originHost) continue;
+    // The homepage itself, or an anchor on it, is not a second page.
+    if (resolved.pathname.replace(/\/+$/, '') === '') continue;
+    resolved.hash = '';
+    return resolved.toString();
+  }
+  return null;
+}
+
 type Signals = ContactSignals & {
   /** True only when every signal above disappears once <script> blocks are removed. */
   jsOnlyContactPath: boolean;
   placesPhone: string | null;
   placesPhoneMissingFromSource: boolean;
+  /**
+   * The pathname of the contact page whose bytes are IN these signals, null
+   * when the verdict rests on the homepage alone. Every sentence that speaks
+   * about where something is absent scopes itself with this: a claim may
+   * never be wider than the pages that were actually read.
+   */
+  contactPagePath: string | null;
   /**
    * Phone numbers in the RAW homepage source, scripts and JSON-LD included.
    * `textPhones` sees only visible text, so "no phone number appears
@@ -272,6 +336,11 @@ function verdicts(s: Signals, candidate: Candidate): Verdict[] {
   const hasTel = s.telNumbers.length > 0;
   const hasOtherPath = s.mailtoAddresses.length > 0 || s.hasContactForm || s.hasContactPageLink || s.bookingHosts.length > 0;
   const hasTextPhone = s.textPhones.length > 0;
+  // Where these signals were read, said in every absence claim. Older test
+  // fixtures omit the field, which reads as homepage-only, the old meaning.
+  const scope = s.contactPagePath
+    ? `the homepage or its contact page (${s.contactPagePath})`
+    : 'the homepage';
 
   const telSnippet = candidate.phone
     ? `<a href="tel:+1${digitsOnly(candidate.phone)}">${candidate.phone}</a>`
@@ -299,7 +368,7 @@ function verdicts(s: Signals, candidate: Candidate): Verdict[] {
       status: 'flaw',
       variant: 'no-contact-path',
       detail:
-        'No tel: link, no mailto: link, no contact form and no booking link appear anywhere on the homepage. There is ' +
+        `No tel: link, no mailto: link, no contact form and no booking link appear anywhere on ${scope}. There is ` +
         'no machine-readable way to reach this business from it.',
       fix: {
         summary: 'Add a tel: link for the phone number and at least one more way to reach you, such as a mailto: link or a short contact form.',
@@ -351,8 +420,8 @@ function verdicts(s: Signals, candidate: Candidate): Verdict[] {
         variant: 'phone-in-markup-only',
         detail:
           `The only way to reach this business is ${describeOtherPaths(s)}. ` +
-          `A phone number (${sourcePhones.slice(0, 3).join(', ')}) sits in the homepage's own markup. ` +
-          'Nothing on the homepage prints it as text or makes it tappable.',
+          `A phone number (${sourcePhones.slice(0, 3).join(', ')}) sits in the markup of ${scope}. ` +
+          'Nothing there prints it as text or makes it tappable.',
         fix: {
           summary: 'Print the phone number on the page and wrap it in a tel: link, so visitors who would rather call can.',
           effort: 'minutes',
@@ -366,7 +435,9 @@ function verdicts(s: Signals, candidate: Candidate): Verdict[] {
         variant: 'no-phone',
         detail:
           `The only way to reach this business is ${describeOtherPaths(s)}.` +
-          ' No phone number appears anywhere in the homepage source.',
+          (s.contactPagePath
+            ? ` No phone number appears in the homepage source or on its contact page (${s.contactPagePath}).`
+            : ' No phone number appears anywhere in the homepage source.'),
         fix: {
           summary: 'Add a phone number as a tel: link, so visitors who would rather call than fill out a form or email can.',
           effort: 'minutes',
@@ -383,7 +454,7 @@ function verdicts(s: Signals, candidate: Candidate): Verdict[] {
       variant: 'phone-only',
       detail:
         `The only reachable contact path is a phone number (${s.telNumbers.join(', ')}). There is no mailto: link, ` +
-        'contact form, contact page link or booking link anywhere on the homepage.',
+        `contact form, contact page link or booking link anywhere on ${scope}.`,
       fix: {
         summary: 'Add a mailto: link or a short contact form alongside the phone number.',
         effort: 'minutes',
@@ -395,7 +466,9 @@ function verdicts(s: Signals, candidate: Candidate): Verdict[] {
     out.push({
       severity: 0,
       status: 'ok',
-      detail: `At least one tel: link (${s.telNumbers.join(', ')}) is present, along with ${describeOtherPaths(s)}.`,
+      detail:
+        `At least one tel: link (${s.telNumbers.join(', ')}) is present on ${scope}, ` +
+        `along with ${describeOtherPaths(s)}.`,
     });
   }
 
@@ -472,23 +545,55 @@ export const bookingPathCheck: FlawCheck = {
 
     const rawSignals = computeContactSignals(html);
     const strippedSignals = computeContactSignals(stripScripts(html));
+
+    /**
+     * Follow the road sign. When the homepage links a same-origin contact
+     * page, that page is where contact information lives, and it is one
+     * ctx.fetch away (memoised: ai-readiness usually read it already in the
+     * same scan). A live scan wrote "the only way to reach this business is
+     * a link to a contact page" while the packet's own capture of that page
+     * carried a tel: link.
+     */
+    const contactUrl = contactPageUrl(html, listed);
+    const contact = contactUrl ? await ctx.fetch(contactUrl) : null;
+    const contactReadable =
+      contact !== null &&
+      contact.ref.httpStatus === 200 &&
+      !contact.ref.storeError &&
+      contact.body.trim() !== '' &&
+      !contact.ref.truncated;
+    const contactPagePath = (() => {
+      if (!contactReadable || !contactUrl) return null;
+      try {
+        return new URL(contactUrl).pathname;
+      } catch {
+        return null;
+      }
+    })();
+
+    const effStripped = contactReadable
+      ? mergeSignals(strippedSignals, computeContactSignals(stripScripts(contact.body)))
+      : strippedSignals;
+    const effRaw = contactReadable ? mergeSignals(rawSignals, computeContactSignals(contact.body)) : rawSignals;
     // The ladder is built on what survives without JavaScript, because that is
     // what a crawler that does not execute scripts actually sees. jsOnlyContactPath
     // catches the case where raw has something the stripped version does not.
-    const jsOnlyContactPath = anyContactSignal(rawSignals) && !anyContactSignal(strippedSignals);
+    const jsOnlyContactPath = anyContactSignal(effRaw) && !anyContactSignal(effStripped);
+
+    const rawSources = contactReadable ? [html, contact.body] : [html];
 
     const placesPhone = ctx.candidate.phone;
     const placesLast10 = placesPhone ? last10(digitsOnly(placesPhone)) : '';
-    const homepageDigits = digitsOnly(html);
-    const placesPhoneMissingFromSource = placesLast10.length === 10 && !homepageDigits.includes(placesLast10);
+    const readDigits = digitsOnly(rawSources.join(' '));
+    const placesPhoneMissingFromSource = placesLast10.length === 10 && !readDigits.includes(placesLast10);
 
-    // The RAW source, scripts included: this feeds the sentences that speak
-    // about "the homepage source", so it has to read all of it, and only the
-    // shapes that are really phones. Deduped on the last ten digits so
-    // "+1-555-010-2000" and "555-010-2000" read as one number.
+    // The RAW source of every page read, scripts included: this feeds the
+    // sentences that speak about the source, so it has to read all of it, and
+    // only the shapes that are really phones. Deduped on the last ten digits
+    // so "+1-555-010-2000" and "555-010-2000" read as one number.
     const seenPhones = new Set<string>();
     const sourcePhones: string[] = [];
-    for (const p of [...schemaTelephones(html), ...(html.match(PHONE_FORMATTED_RE) ?? [])]) {
+    for (const p of rawSources.flatMap((src) => [...schemaTelephones(src), ...(src.match(PHONE_FORMATTED_RE) ?? [])])) {
       const dedupeKey = last10(digitsOnly(p));
       if (dedupeKey.length < 7 || seenPhones.has(dedupeKey)) continue;
       seenPhones.add(dedupeKey);
@@ -496,15 +601,49 @@ export const bookingPathCheck: FlawCheck = {
     }
 
     const s: Signals = {
-      ...strippedSignals,
+      ...effStripped,
       jsOnlyContactPath,
       placesPhone,
       placesPhoneMissingFromSource,
+      contactPagePath,
       sourcePhones,
     };
 
     const all = verdicts(s, ctx.candidate);
     const verdict = worst(all);
+
+    /**
+     * The reconciling pass never recomputes this verdict from fewer pages
+     * than the crawler read. A linked contact page the operator did not
+     * paste arrives as an unanswered capture; scoring the homepage alone
+     * would manufacture a contrary verdict from missing bytes and the gate
+     * would read it as the site answering crawlers differently. The check
+     * abstains and names the paste that settles it, except when the homepage
+     * alone already reaches severity 0: an extra page only ever ADDS
+     * channels, so nothing it holds could change that verdict.
+     */
+    const contactUnanswered =
+      contact !== null && (contact.ref.httpStatus === null || Boolean(contact.ref.transportError));
+    if (ctx.reconciling && contactUrl && contactUnanswered && verdict.severity > 0) {
+      let pastePath = contactUrl;
+      try {
+        pastePath = new URL(contactUrl).pathname || contactUrl;
+      } catch {
+        /* keep the full url */
+      }
+      return {
+        checkId: 'booking-path',
+        status: 'unverified',
+        severity: 0,
+        headline: `The homepage links a contact page (${pastePath}) that was not pasted, so the contact path could not be re-checked.`,
+        detail:
+          `The homepage links a contact page (${pastePath}) whose source was not pasted. The reachable ` +
+          'contact set includes that page, so no verdict is re-computed without it.',
+        evidence: [capture.ref].filter((r) => r.httpStatus !== null),
+        confirmation: 'remote',
+        unverifiedNote: `Paste the source of the contact page (${pastePath}) to settle the contact-path finding.`,
+      };
+    }
 
     let detail =
       all.length > 1
@@ -512,7 +651,9 @@ export const bookingPathCheck: FlawCheck = {
         : verdict.detail;
 
     if (s.placesPhoneMissingFromSource && s.placesPhone) {
-      detail += ` Google Places lists a phone number for this business (${s.placesPhone}) that does not appear anywhere in the homepage source, on its own digits.`;
+      detail += ` Google Places lists a phone number for this business (${s.placesPhone}) that does not appear anywhere in the ${
+        contactPagePath ? 'source of the homepage or its contact page' : 'homepage source'
+      }, on its own digits.`;
     }
 
     let headline = `${ctx.candidate.name}: ${verdict.detail}`;
@@ -538,10 +679,15 @@ export const bookingPathCheck: FlawCheck = {
       severity: verdict.severity,
       headline,
       detail,
-      evidence: [capture.ref].filter((r) => r.httpStatus !== null),
+      // Both pages the verdict rests on are cited; a claim is never wider
+      // than the captures under it.
+      evidence: [capture.ref, ...(contactReadable ? [contact.ref] : [])].filter((r) => r.httpStatus !== null),
       confirmation: 'remote',
       fix: verdict.fix,
       variant: verdict.variant,
+      // The confirm UI offers a paste slot per extra page, and the
+      // reconciling pass above refuses to re-judge without it.
+      extraPages: contactReadable && contactUrl ? [contactUrl] : undefined,
     };
   },
 };

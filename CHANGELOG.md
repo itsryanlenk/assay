@@ -101,9 +101,19 @@ packet workflow, hardened and audited, but not yet tagged.
   that lives only in the page markup, a JSON-LD telephone for instance, is
   named as exactly that rather than denied with "no phone number appears
   anywhere in the page source", a sentence contradicted by the capture it
-  cited. A true absence is scoped to the homepage, the one page the check
-  reads, and raw-source phone detection requires a phone shape a human would
-  format, so a bare ten-digit script ID never prints as a phone number.
+  cited. A true absence is scoped to the pages the check read, and raw-source
+  phone detection requires a phone shape a human would format, so a bare
+  ten-digit script ID never prints as a phone number.
+- The booking-path check follows the contact link it detects. It used to
+  write "the only way to reach this business is a link to a contact page"
+  while the same scan's capture of that contact page carried a tel: link.
+  When the homepage links a same-origin contact page, that page is fetched
+  (one hop, memoised, never a lookalike domain), its channels count, every
+  sentence says which pages were read, both captures are cited, and the
+  confirm view offers a paste slot for it. The reconciling pass refuses to
+  re-judge from fewer pages than the crawler read: with the contact page
+  unpasted it abstains and names the paste that settles it, unless the
+  homepage alone already reaches severity 0, which no extra page can change.
 - A phone number carrying an extension no longer reads as a different number.
   The extension survived the last-ten-digits comparison and dropped area-code
   digits instead, which named a business's own correct number as wrong at the

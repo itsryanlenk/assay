@@ -1143,11 +1143,107 @@ async function bookingPathRunEndToEnd() {
   const idHtml = '<html><head><script>var assetId=1784831051;var t=1786540383;</script></head>' +
     '<body><a href="/pages/contact">Contact</a><a href="mailto:hello@solo.test">Email</a>' +
     '<p>' + 'Consulting for local firms. '.repeat(20) + '</p></body></html>';
-  const idFinding = await BP.bookingPathCheck.run({ ...ctx, fetch: async () => ({ body: idHtml, ref: { httpStatus: 200, truncated: false }, captured: true }) });
+  // The contact link 404s here on purpose: this case pins the HOMEPAGE-scoped
+  // sentence; the followed-contact-page sentences are pinned by the hop tests.
+  const idFetch = async (url) =>
+    url.replace(/\/+$/, '') === 'https://solo.test'
+      ? { body: idHtml, ref: { httpStatus: 200, truncated: false }, captured: true }
+      : { body: '', ref: { httpStatus: 404, truncated: false }, captured: true };
+  const idFinding = await BP.bookingPathCheck.run({ ...ctx, fetch: idFetch });
   eq('run(): a bare ten-digit script ID never reads as a phone in the markup',
     /markup/.test(idFinding.detail), false);
   eq('run(): the ID page gets the honest homepage-scoped absence sentence',
     /anywhere in the homepage source/.test(idFinding.detail), true);
+}
+
+// The check detects the contact-page link, so it follows it. From a live scan:
+// the homepage carried no phone, the finding said the only way to reach the
+// business was "a link to a contact page", and the packet's OWN capture of
+// that contact page held a tel: link. A check that names the road sign and
+// does not follow it writes claims its own evidence folder contradicts.
+async function bookingContactHopEndToEnd() {
+  const BP = require(path.join(ROOT, 'dist/main/main/checks/booking-path.js'));
+  const ORIGIN = 'https://hopshop.test';
+  const HOME =
+    '<html><body><a href="/contact">Contact</a>' +
+    '<a href="mailto:hello@hopshop.test">Email</a>' +
+    '<p>' + 'Handmade goods for local buyers. '.repeat(20) + '</p></body></html>';
+  const CONTACT =
+    '<html><body><a href="tel:+15550102000">+1 (555) 010-2000</a>' +
+    '<a href="mailto:hello@hopshop.test">Email</a>' +
+    '<p>Reach us any weekday.</p></body></html>';
+
+  const cap = (url, body) => ({
+    ref: {
+      id: url, url, requestedUrl: url, source: 'crawler', method: 'GET', httpStatus: 200,
+      contentType: 'text/html', fetchedAt: new Date().toISOString(),
+      sha256: 'f'.repeat(64), byteLength: body.length, storedPath: '(test)',
+    },
+    body, captured: true,
+  });
+  const unknownCap = (url) => ({
+    ref: {
+      id: url, url, requestedUrl: url, source: 'operator-browser', method: 'GET', httpStatus: null,
+      contentType: null, fetchedAt: new Date().toISOString(), sha256: '', byteLength: 0,
+      storedPath: '', transportError: 'not pasted by the operator',
+    },
+    body: '', captured: false,
+  });
+  const goneCap = (url) => ({
+    ref: {
+      id: url, url, requestedUrl: url, source: 'crawler', method: 'GET', httpStatus: 404,
+      contentType: 'text/html', fetchedAt: new Date().toISOString(),
+      sha256: 'a'.repeat(64), byteLength: 0, storedPath: '(test)',
+    },
+    body: '', captured: true,
+  });
+
+  const cand = { name: 'Hop Shop', address: '', phone: null, website: ORIGIN, source: 'google-places-new' };
+  const ctxOf = (fetch, reconciling) => ({
+    candidate: cand, scanId: 'hop', evidenceRoot: '(unused)',
+    agent: { run: async () => ({ ok: false, text: '' }) }, fetch, reconciling,
+  });
+  const isHome = (url) => url.replace(/\/+$/, '') === ORIGIN;
+
+  // Crawler pass, both pages readable: the tel: link one click away counts.
+  const both = async (url) => (isHome(url) ? cap(url, HOME) : /\/contact$/.test(url.replace(/\/+$/, '')) ? cap(url, CONTACT) : goneCap(url));
+  const okRun = await BP.bookingPathCheck.run(ctxOf(both, false));
+  eq('hop: a tel: link on the linked contact page reaches the verdict', okRun.status, 'ok');
+  eq('hop: the verdict says where the tel: link was found', /contact page/.test(okRun.detail), true);
+  eq('hop: the finding lists the contact page for the confirm paste slot',
+    Array.isArray(okRun.extraPages) && okRun.extraPages.some((u) => /\/contact$/.test(u)), true);
+  eq('hop: both captures are cited as evidence', okRun.evidence.length, 2);
+
+  // Reconciling pass, contact page not pasted: the check abstains instead of
+  // recomputing a contrary verdict from bytes it does not have.
+  const unpasted = async (url) => (isHome(url) ? cap(url, HOME) : unknownCap(url));
+  const rec = await BP.bookingPathCheck.run(ctxOf(unpasted, true));
+  eq('hop: reconciling without the contact paste abstains', rec.status, 'unverified');
+  eq('hop: and the note names the page to paste', /contact/i.test(rec.unverifiedNote || ''), true);
+
+  // Reconciling pass, homepage alone already reaches severity 0: nothing the
+  // contact page could add changes the verdict, so no abstention is needed.
+  const HOME_OK = HOME.replace('<a href="mailto:', '<a href="tel:+15550102000">Call</a><a href="mailto:');
+  const okAlone = async (url) => (isHome(url) ? cap(url, HOME_OK) : unknownCap(url));
+  const recOk = await BP.bookingPathCheck.run(ctxOf(okAlone, true));
+  eq('hop: a homepage that alone reaches severity 0 still confirms', recOk.status, 'ok');
+
+  // Crawler pass, contact page unreadable: claims stay homepage-scoped and no
+  // paste slot is offered for a page nobody read.
+  const dead = async (url) => (isHome(url) ? cap(url, HOME) : goneCap(url));
+  const deadRun = await BP.bookingPathCheck.run(ctxOf(dead, false));
+  eq('hop: an unreadable contact page keeps the claim homepage-scoped',
+    /anywhere in the homepage source/.test(deadRun.detail), true);
+  eq('hop: and no paste slot is offered for a page nobody read',
+    !deadRun.extraPages || deadRun.extraPages.length === 0, true);
+
+  // A lookalike domain in the contact link is never fetched as the site.
+  const seen = [];
+  const LOOKALIKE = HOME.replace('href="/contact"', 'href="https://hopshop.test.evil.test/contact"');
+  const spy = async (url) => { seen.push(url); return isHome(url) ? cap(url, LOOKALIKE) : goneCap(url); };
+  await BP.bookingPathCheck.run(ctxOf(spy, false));
+  eq('hop: a lookalike domain in the contact link is never fetched',
+    seen.some((u) => u.includes('evil.test')), false);
 }
 
 // --- brand: colour derivation, which decides whether a client can read it ---
@@ -1752,6 +1848,7 @@ Promise.resolve()
   .then(napRunEndToEnd)
   .then(urlCandidateRunEndToEnd)
   .then(bookingPathRunEndToEnd)
+  .then(bookingContactHopEndToEnd)
   .catch((err) => failures.push(`an end-to-end run threw\n      ${err && err.stack ? err.stack : err}`))
   .then(() => {
     console.log('\n--- PARSER TESTS ---');
