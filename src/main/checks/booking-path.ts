@@ -146,6 +146,26 @@ function bookingHostOf(href: string): string | null {
 /** A US-shaped phone number in plain text. Bounded on both ends so it does not eat part of a longer digit run. */
 const PHONE_TEXT_RE = /(?<!\d)\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}(?!\d)/g;
 
+/**
+ * The same shape with the separators REQUIRED, for scanning raw source where
+ * bare ten-digit runs are usually IDs rather than phones. See Signals.sourcePhones.
+ */
+const PHONE_FORMATTED_RE = /(?<!\d)\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?!\d)/g;
+
+/**
+ * `telephone` property values from JSON-LD script bodies, by shape rather than
+ * by parsing: the check needs the values, not the graph, and a regex cannot be
+ * broken by one malformed sibling block the way JSON.parse can.
+ */
+function schemaTelephones(html: string): string[] {
+  const out: string[] = [];
+  for (const m of html.matchAll(/"telephone"\s*:\s*"([^"]{7,24})"/g)) {
+    const v = (m[1] ?? '').trim();
+    if (digitsOnly(v).length >= 7) out.push(v);
+  }
+  return out;
+}
+
 type ContactSignals = {
   telNumbers: string[];
   mailtoAddresses: string[];
@@ -212,6 +232,20 @@ type Signals = ContactSignals & {
   jsOnlyContactPath: boolean;
   placesPhone: string | null;
   placesPhoneMissingFromSource: boolean;
+  /**
+   * Phone numbers in the RAW homepage source, scripts and JSON-LD included.
+   * `textPhones` sees only visible text, so "no phone number appears
+   * anywhere in the page source" shipped on a live scan whose own cited
+   * capture carried a telephone field in its structured data. A claim about
+   * the source has to read all of the source.
+   *
+   * Conservative on purpose: raw source is mostly script, where any bare
+   * ten-digit ID matches a loose phone shape, and the first version of this
+   * signal harvested asset IDs and timestamps that would have printed on a
+   * client document as phone numbers. Only two shapes count: a telephone
+   * property inside JSON-LD, and a separator-formatted number anywhere.
+   */
+  sourcePhones: string[];
 };
 
 /** `variant` names the verdict shape so the hook copy can be keyed on it; see FlawFinding.variant. */
@@ -265,8 +299,8 @@ function verdicts(s: Signals, candidate: Candidate): Verdict[] {
       status: 'flaw',
       variant: 'no-contact-path',
       detail:
-        'No tel: link, no mailto: link, no contact form and no booking link appear anywhere on the page. There is ' +
-        'no machine-readable way to reach this business.',
+        'No tel: link, no mailto: link, no contact form and no booking link appear anywhere on the homepage. There is ' +
+        'no machine-readable way to reach this business from it.',
       fix: {
         summary: 'Add a tel: link for the phone number and at least one more way to reach you, such as a mailto: link or a short contact form.',
         effort: 'minutes',
@@ -292,21 +326,54 @@ function verdicts(s: Signals, candidate: Candidate): Verdict[] {
   }
 
   if (!hasTel && !hasTextPhone && hasOtherPath) {
-    out.push({
-      severity: 1,
-      status: 'flaw',
-      variant: 'no-phone',
-      detail:
-        `The only way to reach this business is ${describeOtherPaths(s)}.` +
-        (s.placesPhone && !s.placesPhoneMissingFromSource
-          ? ` The number Google lists (${s.placesPhone}) does appear in the page source, but no tel: link on the page makes it tappable.`
-          : ' No phone number appears anywhere in the page source.'),
-      fix: {
-        summary: 'Add a phone number as a tel: link, so visitors who would rather call than fill out a form or email can.',
-        effort: 'minutes',
-        snippet: telSnippet,
-      },
-    });
+    const sourcePhones = s.sourcePhones ?? [];
+    if (s.placesPhone && !s.placesPhoneMissingFromSource) {
+      out.push({
+        severity: 1,
+        status: 'flaw',
+        variant: 'no-phone',
+        detail:
+          `The only way to reach this business is ${describeOtherPaths(s)}.` +
+          ` The number Google lists (${s.placesPhone}) does appear in the page source, but no tel: link on the page makes it tappable.`,
+        fix: {
+          summary: 'Add a phone number as a tel: link, so visitors who would rather call than fill out a form or email can.',
+          effort: 'minutes',
+          snippet: telSnippet,
+        },
+      });
+    } else if (sourcePhones.length > 0) {
+      // A phone IS in the source, only in markup a visitor never sees. The
+      // old sentence here ("no phone number appears anywhere in the page
+      // source") was contradicted by the very capture it cited.
+      out.push({
+        severity: 1,
+        status: 'flaw',
+        variant: 'phone-in-markup-only',
+        detail:
+          `The only way to reach this business is ${describeOtherPaths(s)}. ` +
+          `A phone number (${sourcePhones.slice(0, 3).join(', ')}) sits in the homepage's own markup. ` +
+          'Nothing on the homepage prints it as text or makes it tappable.',
+        fix: {
+          summary: 'Print the phone number on the page and wrap it in a tel: link, so visitors who would rather call can.',
+          effort: 'minutes',
+          snippet: `<a href="tel:+1${digitsOnly(sourcePhones[0] ?? '')}">${sourcePhones[0] ?? ''}</a>`,
+        },
+      });
+    } else {
+      out.push({
+        severity: 1,
+        status: 'flaw',
+        variant: 'no-phone',
+        detail:
+          `The only way to reach this business is ${describeOtherPaths(s)}.` +
+          ' No phone number appears anywhere in the homepage source.',
+        fix: {
+          summary: 'Add a phone number as a tel: link, so visitors who would rather call than fill out a form or email can.',
+          effort: 'minutes',
+          snippet: telSnippet,
+        },
+      });
+    }
   }
 
   if (hasTel && !hasOtherPath) {
@@ -316,7 +383,7 @@ function verdicts(s: Signals, candidate: Candidate): Verdict[] {
       variant: 'phone-only',
       detail:
         `The only reachable contact path is a phone number (${s.telNumbers.join(', ')}). There is no mailto: link, ` +
-        'contact form, contact page link or booking link anywhere on the page.',
+        'contact form, contact page link or booking link anywhere on the homepage.',
       fix: {
         summary: 'Add a mailto: link or a short contact form alongside the phone number.',
         effort: 'minutes',
@@ -415,11 +482,25 @@ export const bookingPathCheck: FlawCheck = {
     const homepageDigits = digitsOnly(html);
     const placesPhoneMissingFromSource = placesLast10.length === 10 && !homepageDigits.includes(placesLast10);
 
+    // The RAW source, scripts included: this feeds the sentences that speak
+    // about "the homepage source", so it has to read all of it, and only the
+    // shapes that are really phones. Deduped on the last ten digits so
+    // "+1-555-010-2000" and "555-010-2000" read as one number.
+    const seenPhones = new Set<string>();
+    const sourcePhones: string[] = [];
+    for (const p of [...schemaTelephones(html), ...(html.match(PHONE_FORMATTED_RE) ?? [])]) {
+      const dedupeKey = last10(digitsOnly(p));
+      if (dedupeKey.length < 7 || seenPhones.has(dedupeKey)) continue;
+      seenPhones.add(dedupeKey);
+      sourcePhones.push(p.trim());
+    }
+
     const s: Signals = {
       ...strippedSignals,
       jsOnlyContactPath,
       placesPhone,
       placesPhoneMissingFromSource,
+      sourcePhones,
     };
 
     const all = verdicts(s, ctx.candidate);

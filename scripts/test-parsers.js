@@ -411,6 +411,73 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
   eq('a real nested Offer object earns the Offer points',
     A.scoreProductReview([{ '@type': 'Product', name: 'x', offers: { '@type': 'Offer', price: '0' } }], false).earned, 15);
 
+  // --- The sole-proprietor blind spots, from a live self-scan ---------------
+  // A one-person business marks itself up the recommended way: a Person named
+  // after the business (the proprietor IS the brand) carrying jobTitle,
+  // worksFor and knowsAbout, an org whose founder points back at that Person
+  // by @id, and every Service nested at hasOfferCatalog -> itemListElement ->
+  // itemOffered. The scan denied all of it: "no human Person node" and "no
+  // Product or Service node", both contradicted by the packet's own captures.
+  {
+    const SOLO = 'Casey Sample Consulting';
+    const person = {
+      '@type': 'Person', '@id': 'https://solo.test/#casey',
+      name: SOLO, jobTitle: 'Consultant',
+      worksFor: { '@id': 'https://solo.test/#org' },
+      knowsAbout: ['consulting'], sameAs: ['https://profiles.example.test/casey'],
+    };
+    const org = {
+      '@type': 'ProfessionalService', '@id': 'https://solo.test/#org',
+      name: SOLO, telephone: '+1-555-010-2000',
+      founder: { '@id': 'https://solo.test/#casey' },
+      sameAs: ['https://profiles.example.test/casey'],
+      hasOfferCatalog: {
+        '@type': 'OfferCatalog',
+        itemListElement: [{
+          '@type': 'Offer',
+          priceSpecification: { '@type': 'UnitPriceSpecification', minPrice: '75', priceCurrency: 'USD' },
+          itemOffered: { '@type': 'Service', name: 'Consulting session' },
+        }],
+      },
+    };
+    const website = { '@type': 'WebSite', name: SOLO, url: 'https://solo.test' };
+
+    const entity = A.scoreEntitySchema([person, org, website], SOLO);
+    eq('a founder-backed Person named after a sole proprietorship is a human',
+      /no human Person node/.test(entity.note), false);
+    eq('and the entity item reaches its full twenty', entity.earned, 20);
+
+    // The original heuristic still holds: a bare Person that merely repeats
+    // the brand name, with nothing human about it, is still not a human.
+    const brandOnly = A.scoreEntitySchema(
+      [{ '@type': 'Person', name: SOLO }, org, website], SOLO);
+    eq('a bare Person repeating the brand name is still not a human',
+      /no human Person node/.test(brandOnly.note), true);
+
+    const pr = A.scoreProductReview([person, org, website], false);
+    eq('a Service nested in an offer catalog is never called absent',
+      /no Product or Service node/.test(pr.note), false);
+    eq('the nested Service earns the product points and the catalog Offer its own',
+      pr.earned, 15);
+
+    // Same classes, adjacent doors, found by the sweep. A Person carrying a
+    // telephone must never be elected as the business node, or its missing
+    // sameAs and @id are read off the wrong entity.
+    const phonePerson = { '@type': 'Person', name: 'Casey Sample', telephone: '+1-555-010-2000' };
+    const plainOrg = { '@type': 'Organization', name: 'X Co', sameAs: ['https://profiles.example.test/x'], '@id': 'https://x.test/#org' };
+    eq('a Person carrying a phone is never elected as the business node',
+      A.scoreEntitySchema([phonePerson, plainOrg], 'X Co').earned, 13);
+
+    // And the self-review advisory has to see rating markup where it actually
+    // lives, nested inside the thing it rates.
+    const rated = A.scoreProductReview([{
+      '@type': 'Product', name: 'x',
+      aggregateRating: { '@type': 'AggregateRating', ratingValue: '5', reviewCount: '2' },
+    }], false);
+    eq('rating markup nested in a Product still trips the self-review advisory',
+      /Review or AggregateRating markup found/.test(rated.note), true);
+  }
+
   // Taxonomy and archive URLs a sitemap lists but an llms.txt should not, so
   // they never count as missing coverage.
   eq('a category archive is a taxonomy path', A.isTaxonomyArchivePath('/category/uncategorized/'), true);
@@ -992,6 +1059,9 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
       { textPhones: ['(555) 111-2222'] },
       { mailtoAddresses: ['a@example.test'] },
       { telNumbers: ['+15551112222'] },
+      // The phone that exists only in markup: no listing phone to compare,
+      // nothing visible, one phone-shaped string in the raw source.
+      { mailtoAddresses: ['a@example.test'], placesPhone: null, sourcePhones: ['(555) 111-2222'] },
     ].flatMap((over) => BP.__test.verdicts({ ...bpBase, ...over }, cand).map((v) => ({ checkId: 'booking-path', v }))),
     ...[
       napAspects({ phone: aspect('mismatch'), street: aspect('mismatch'), postal: aspect('mismatch') }),
@@ -1012,6 +1082,72 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
   const seen = new Set(produced.map(({ checkId, v }) => `${checkId}:${v.variant}`));
   const orphaned = Object.keys(PL.VERDICT_COPY).filter((k) => !seen.has(k));
   eq('no verdict copy is orphaned (unreachable by any verdict)', orphaned, []);
+}
+
+// --- booking-path: the sentence may not outrun the bytes it read -------------
+// From a live self-scan: the homepage carried a telephone inside its JSON-LD
+// and the finding said "No phone number appears anywhere in the page source",
+// citing the very capture that contradicted it. Two rules pinned here: a phone
+// in the raw markup is named, not denied, and a true absence claim is scoped
+// to the homepage, the only page this check reads.
+{
+  const BP = require(path.join(ROOT, 'dist/main/main/checks/booking-path.js'));
+  const soloCand = { name: 'Casey Sample Consulting', phone: null };
+  const base = {
+    telNumbers: [], mailtoAddresses: ['hello@solo.test'], hasContactForm: false,
+    hasContactPageLink: true, bookingHosts: [], textPhones: [],
+    jsOnlyContactPath: false, placesPhone: null, placesPhoneMissingFromSource: false,
+  };
+
+  const inMarkup = BP.__test.verdicts({ ...base, sourcePhones: ['(555) 010-2000'] }, soloCand)
+    .find((v) => v.severity === 1);
+  eq('a phone in the raw markup is never called absent from the source',
+    /appears anywhere in the (page|homepage) source/.test(inMarkup ? inMarkup.detail : '(none)'), false);
+  eq('the sentence says where the phone actually sits',
+    /markup/.test(inMarkup ? inMarkup.detail : '(none)'), true);
+  eq('and the shape has its own variant for the hook copy',
+    inMarkup && inMarkup.variant, 'phone-in-markup-only');
+
+  const nowhere = BP.__test.verdicts({ ...base, sourcePhones: [] }, soloCand)
+    .find((v) => v.severity === 1);
+  eq('a true absence claim is scoped to the homepage',
+    /anywhere in the homepage source/.test(nowhere ? nowhere.detail : '(none)'), true);
+  eq('and never claims the whole page set',
+    /anywhere in the page source/.test(nowhere ? nowhere.detail : '(none)'), false);
+
+}
+
+// run(): the raw-source phone signal is wired from the real capture, not only
+// a fixture. Joined to the async tail below, never a floating promise: a
+// floating one races the report and its assertions could land after the exit.
+async function bookingPathRunEndToEnd() {
+  const BP = require(path.join(ROOT, 'dist/main/main/checks/booking-path.js'));
+  const html = '<html><head><script type="application/ld+json">' +
+    '{"@context":"https://schema.org","@type":"ProfessionalService","name":"Casey Sample Consulting","telephone":"+1-555-010-2000"}' +
+    '</script></head><body><a href="/pages/contact">Contact</a>' +
+    '<a href="mailto:hello@solo.test">Email</a><p>' + 'Consulting for local firms. '.repeat(20) + '</p></body></html>';
+  const ctx = {
+    candidate: { name: 'Casey Sample Consulting', address: '', phone: null, website: 'https://solo.test', source: 'google-places-new' },
+    scanId: 'bp-solo', evidenceRoot: '(unused)',
+    agent: { run: async () => ({ ok: false, text: '' }) },
+    fetch: async () => ({ body: html, ref: { httpStatus: 200, truncated: false }, captured: true }),
+  };
+  const finding = await BP.bookingPathCheck.run(ctx);
+  eq('run(): a schema telephone reaches the sentence as a markup phone',
+    /markup/.test(finding.detail) && !/appears anywhere in the (page|homepage) source/.test(finding.detail),
+    true);
+
+  // The guard on the guard: raw source is mostly script, and a bare ten-digit
+  // ID must never print on a client document as a phone number. Only a
+  // JSON-LD telephone or a separator-formatted number counts.
+  const idHtml = '<html><head><script>var assetId=1784831051;var t=1786540383;</script></head>' +
+    '<body><a href="/pages/contact">Contact</a><a href="mailto:hello@solo.test">Email</a>' +
+    '<p>' + 'Consulting for local firms. '.repeat(20) + '</p></body></html>';
+  const idFinding = await BP.bookingPathCheck.run({ ...ctx, fetch: async () => ({ body: idHtml, ref: { httpStatus: 200, truncated: false }, captured: true }) });
+  eq('run(): a bare ten-digit script ID never reads as a phone in the markup',
+    /markup/.test(idFinding.detail), false);
+  eq('run(): the ID page gets the honest homepage-scoped absence sentence',
+    /anywhere in the homepage source/.test(idFinding.detail), true);
 }
 
 // --- brand: colour derivation, which decides whether a client can read it ---
@@ -1615,6 +1751,7 @@ process.exitCode = 1;
 Promise.resolve()
   .then(napRunEndToEnd)
   .then(urlCandidateRunEndToEnd)
+  .then(bookingPathRunEndToEnd)
   .catch((err) => failures.push(`an end-to-end run threw\n      ${err && err.stack ? err.stack : err}`))
   .then(() => {
     console.log('\n--- PARSER TESTS ---');

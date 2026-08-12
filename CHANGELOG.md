@@ -84,6 +84,26 @@ packet workflow, hardened and audited, but not yet tagged.
   name, so changing any of them left every earlier row outside the supersede
   sweep: an approved artifact stayed approved and stayed sendable while a
   newer scan of the same business existed.
+- The entity check no longer denies a sole proprietorship its human. A Person
+  named after the business used to be rejected outright; name equality is now
+  a soft signal, overridden when the node carries human-only properties such
+  as jobTitle or worksFor, or when the organization's founder points back at
+  it. A live self-scan shipped "no human Person node" about a page whose org
+  did exactly that. The business-node fallback also stops electing a Person
+  that happens to carry a telephone.
+- Product and Service detection walks the whole JSON-LD tree. The
+  schema.org-recommended shape nests every Service at hasOfferCatalog,
+  itemListElement, itemOffered, and a page carrying eight of them was told
+  "no Product or Service node" in the same note that credited the Offer
+  sitting beside them. The self-review advisory reads nested rating markup
+  for the same reason.
+- The booking-path check stops claiming more source than it read. A phone
+  that lives only in the page markup, a JSON-LD telephone for instance, is
+  named as exactly that rather than denied with "no phone number appears
+  anywhere in the page source", a sentence contradicted by the capture it
+  cited. A true absence is scoped to the homepage, the one page the check
+  reads, and raw-source phone detection requires a phone shape a human would
+  format, so a bare ten-digit script ID never prints as a phone number.
 - A phone number carrying an extension no longer reads as a different number.
   The extension survived the last-ten-digits comparison and dropped area-code
   digits instead, which named a business's own correct number as wrong at the
