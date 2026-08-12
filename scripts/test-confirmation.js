@@ -116,6 +116,105 @@ async function crawlerRunFrom(html) {
     JSON.stringify(diverging.divergences));
   ok('diverged finding carries an explanation', !!(divFresh && divFresh.divergenceNote));
 
+  // --- 2b. The crawler abstained; the operator measured --------------------
+  // From a live scan. The site answered the crawler with timeouts, so five of
+  // the six checks came back 'unverified' and only the website check measured
+  // anything (the failed load itself). The operator then pasted the real
+  // source of every document.
+  //
+  // 'unverified' is an abstention, not a claim. There is no crawler reading to
+  // void and nothing to accuse the site of, so a verdict measured entirely
+  // from the operator's own bytes is exactly what "operator-confirmed" means.
+  // This used to read as DIVERGED, which is terminal: no paste can ever clear
+  // it, so the packet stayed unreleasable with every document faithfully
+  // supplied - the one operator in the whole flow who did everything right.
+  {
+    const dead = (url) => ({
+      ref: {
+        id: url, url, requestedUrl: url, source: 'crawler', method: 'GET',
+        httpStatus: null, contentType: null, fetchedAt: new Date().toISOString(),
+        sha256: '', byteLength: 0, storedPath: '',
+        transportError: 'timed out after 15000ms',
+      },
+      body: '', captured: false,
+    });
+    const blockedCrawler = await runChecks(
+      { candidate, scanId: 'dead' },
+      { agent: deadAgent, evidenceRoot: EV, fetchOverride: async (u) => dead(u) }
+    );
+
+    // Pin the shape the assertions below depend on, so they cannot pass or
+    // fail for an unrelated reason.
+    const dFresh = blockedCrawler.findings.find((f) => f.checkId === 'freshness');
+    const dAi = blockedCrawler.findings.find((f) => f.checkId === 'ai-readiness');
+    ok('SETUP: an unreachable site leaves freshness unverified',
+      !!dFresh && dFresh.status === 'unverified', dFresh && `${dFresh.status}: ${dFresh.headline}`);
+    ok('SETUP: an unreachable site leaves ai-readiness unscored',
+      !!dAi && dAi.status === 'unverified' && !dAi.score, dAi && `${dAi.status}`);
+
+    const SITEMAP_ONE = '<?xml version="1.0"?><urlset><url><loc>https://example-shop.test/</loc></url></urlset>';
+    const LLMS_ONE = '# Test Shop\n\n## Pages\n- [Home](https://example-shop.test/)\n';
+    const afterOutage = await G.confirm(candidate, blockedCrawler, [
+      { kind: 'homepage', url: 'https://example-shop.test', content: PAGE_UNDATED },
+      { kind: 'robots', url: 'https://example-shop.test/robots.txt', content: ROBOTS },
+      { kind: 'sitemap', url: 'https://example-shop.test/sitemap.xml', content: SITEMAP_ONE },
+      { kind: 'llms', url: 'https://example-shop.test/llms.txt', content: LLMS_ONE },
+    ], { agent: deadAgent, evidenceRoot: EV, scanId: 'dead1' });
+
+    const oFresh = afterOutage.findings.find((f) => f.checkId === 'freshness');
+    ok('a crawler abstention never voids the operator measured verdict',
+      !!oFresh && oFresh.confirmation === 'operator-confirmed',
+      oFresh && `got ${oFresh.confirmation}`);
+    ok('the operator verdict ships: the undated homepage is a flaw with its fix',
+      !!oFresh && oFresh.status === 'flaw' && !!oFresh.fix,
+      oFresh && `${oFresh.status}, fix ${oFresh.fix ? 'present' : 'missing'}`);
+
+    const oAi = afterOutage.findings.find((f) => f.checkId === 'ai-readiness');
+    ok('a score measured from the operator own bytes confirms',
+      !!oAi && oAi.confirmation === 'operator-confirmed' && !!oAi.score,
+      oAi && `${oAi.confirmation}, score ${oAi.score ? oAi.score.rescaled : 'none'}`);
+
+    ok('no divergence is recorded against an abstention',
+      !afterOutage.divergences.some((d) => d.checkId !== 'website'),
+      JSON.stringify(afterOutage.divergences.map((d) => d.checkId)));
+
+    // The one check that MEASURED - the crawler timed out, the browser loads
+    // fine - keeps its divergence. That signal is real and worth raising.
+    const oWeb = afterOutage.findings.find((f) => f.checkId === 'website');
+    ok('the measured failed-load still diverges against a working browser',
+      !!oWeb && oWeb.confirmation === 'diverged', oWeb && `got ${oWeb.confirmation}`);
+
+    ok('the packet is releasable once every measured claim is operator-confirmed',
+      G.releasable(afterOutage.findings, afterOutage.confirmedAt).ok === true,
+      JSON.stringify(G.releasable(afterOutage.findings, afterOutage.confirmedAt)));
+  }
+
+  // --- 2c. The reverse asymmetry: crawler measured, operator pass abstained.
+  // Homepage pasted, robots skipped. The reconciling crawl-index pass cites
+  // the stored homepage (so the no-paste guard does not catch it) and still
+  // cannot judge without robots. That is an abstention against a measurement:
+  // not a divergence, and never the cloaking accusation. It stays remote,
+  // which blocks release just as hard, with a note naming the way forward.
+  {
+    const half = await G.confirm(candidate, crawler, [
+      { kind: 'homepage', url: 'https://example-shop.test', content: PAGE_UNDATED },
+    ], { agent: deadAgent, evidenceRoot: EV, scanId: 'half1' });
+
+    const crawlCi = crawler.findings.find((f) => f.checkId === 'crawl-index');
+    const halfCi = half.findings.find((f) => f.checkId === 'crawl-index');
+    ok('SETUP: the crawler measured crawl-index',
+      !!crawlCi && (crawlCi.status === 'ok' || crawlCi.status === 'flaw'),
+      crawlCi && `${crawlCi.status}: ${crawlCi.headline}`);
+    ok('an operator pass that cannot judge never voids the crawler measurement',
+      !!halfCi && halfCi.confirmation === 'remote', halfCi && `got ${halfCi.confirmation}`);
+    ok('the abstention is explained with a way to settle it',
+      !!halfCi && /confirm again/i.test(halfCi.unverifiedNote || ''),
+      halfCi && halfCi.unverifiedNote);
+    ok('no crawl-index divergence is recorded for an operator abstention',
+      !half.divergences.some((d) => d.checkId === 'crawl-index'),
+      JSON.stringify(half.divergences.map((d) => d.checkId)));
+  }
+
   // --- 3. Nothing pasted -> stays REMOTE, never promoted ------------------
   const nothing = await G.confirm(candidate, crawler, [],
     { agent: deadAgent, evidenceRoot: EV, scanId: 'c3' });

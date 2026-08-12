@@ -19,6 +19,9 @@
  *   diverged   it does not. The claim is void, AND the divergence is itself a
  *              real finding: a site answering crawlers differently than
  *              browsers is worth more than whatever was originally flagged.
+ *              A divergence takes two measurements. A pass that could not
+ *              read enough to judge abstains, and an abstention never voids
+ *              a verdict; only a contrary reading does.
  *   unverified nothing was pasted for the document the finding rests on.
  */
 
@@ -397,6 +400,47 @@ export async function confirm(
           `The crawler read ${skipped.join(', ')}, which you did not paste, so this score could not be ` +
           'fully reconciled against your own source. Paste the missing document(s) or page(s) and confirm ' +
           'again to settle whether it holds.',
+      });
+      continue;
+    }
+
+    /**
+     * A divergence requires two measurements. 'unverified' and 'error' are
+     * abstentions: the pass is saying it could not read enough to judge, and
+     * an abstention cannot contradict a verdict. There is no reading to void
+     * and no cloaking to allege. 'diverged' is also terminal, no paste can
+     * ever clear it, so mislabelling an abstention stranded the packet with
+     * every document faithfully supplied.
+     *
+     * Crawler abstained, operator measured: the operator's verdict ships as
+     * itself, confirmed. It was measured entirely from their own pasted
+     * bytes, which is the strongest provenance this app has, and the checks
+     * already scope its words to exactly what was pasted. This is the site
+     * that times out for crawlers and pastes fine, which a live scan hit.
+     */
+    const measured = (s: string): boolean => s === 'ok' || s === 'flaw';
+    if (!measured(crawlerFinding.status) && measured(opFinding.status)) {
+      findings.push({ ...opFinding, confirmation: 'operator-confirmed' });
+      continue;
+    }
+
+    /**
+     * Operator pass abstained (about anything the crawler's status may be):
+     * still not a divergence, the operator's own source made no contrary
+     * claim. Hold the crawler's reading at 'remote', which blocks release
+     * exactly as 'diverged' did, and tell the operator what would settle it
+     * instead of accusing the site of answering crawlers differently.
+     */
+    if (!measured(opFinding.status)) {
+      findings.push({
+        ...crawlerFinding,
+        confirmation: 'remote',
+        unverifiedNote:
+          (crawlerFinding.unverifiedNote ? crawlerFinding.unverifiedNote + ' ' : '') +
+          'Your pasted source was not enough for this check to reach a verdict, so the ' +
+          "crawler's reading stays unconfirmed rather than contradicted. " +
+          (opFinding.unverifiedNote ? opFinding.unverifiedNote + ' ' : '') +
+          'Paste the document(s) this check reads and confirm again.',
       });
       continue;
     }

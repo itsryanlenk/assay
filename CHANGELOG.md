@@ -65,6 +65,17 @@ packet workflow, hardened and audited, but not yet tagged.
 
 ### Fixed
 
+- A site the crawler could not read no longer strands the operator behind a
+  divergence nothing can clear. A divergence takes two measurements: a pass
+  that could not read enough to judge abstains, an abstention never voids a
+  verdict, and the operator's pasted source now confirms whatever it measured.
+  The failed load itself still diverges when the browser loads fine, because
+  that was measured on both sides and is worth raising.
+- The crawl and index check no longer claims "there is no sitemap.xml and
+  robots.txt declares none" from requests that were never answered. A timeout,
+  a store failure or a missing paste reads as unknown rather than absent, and
+  an unanswered robots.txt makes the check abstain instead of vouching for
+  crawl access it never saw.
 - The approval ledger keys a row to the prospect rather than to the folder
   slug. The slug is built from the business name, the town and the contact
   name, so changing any of them left every earlier row outside the supersede
