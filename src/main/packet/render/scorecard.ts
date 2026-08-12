@@ -164,8 +164,14 @@ function ownerSection(items: Score['items']): string {
        * the maintainer's page, which is where Ctrl+U reproduction lives. The
        * fallback keeps an item whose copy predates `found` printing the note
        * rather than nothing.
+       *
+       * A fully earned item prints no found line at all. Every `found`
+       * string asserts an absence or a shortfall, so on a live 100/100 card
+       * each block opened with a false absence claim directly above its own
+       * "nothing to do here" standing line. At full marks the standing line
+       * IS the fact.
        */
-      const found = (copy.found ?? i.note ?? '').trim();
+      const found = done ? '' : (copy.found ?? i.note ?? '').trim();
       return [
         `<div class="block${shade}">`,
         `<h2>${escapeHtml(copy.title)}</h2>`,
