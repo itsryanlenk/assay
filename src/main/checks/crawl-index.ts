@@ -52,6 +52,18 @@ type Signals = {
   robotsExists: boolean;
   robotsDisallowsAll: boolean;
   robotsSitemapUrls: string[];
+  /**
+   * True when the document was never ANSWERED: a transport failure, a store
+   * failure, or (in the reconciling pass) simply not pasted. documentStatus
+   * calls this 'unknown', and it is a different fact from 'absent': a 404 is
+   * evidence there is no robots.txt, a timeout is evidence of nothing. The
+   * absence verdicts below and the "robots.txt permits crawling" claim all
+   * require an answer, or the check is claiming to have read bytes it never
+   * saw. That exact shape put "There is no sitemap.xml and robots.txt
+   * declares none" on a reconciling pass whose operator had pasted neither.
+   */
+  robotsUnknown: boolean;
+  sitemapUnknown: boolean;
   sitemapExists: boolean;
   /**
    * Whether the sitemap document is a <sitemapindex>, and how many child
@@ -297,7 +309,10 @@ function verdicts(s: Signals): Verdict[] {
     });
   }
 
-  if (!s.sitemapExists && s.robotsSitemapUrls.length === 0) {
+  // Both absences must rest on ANSWERED requests. An unknown robots.txt or
+  // sitemap (timeout, store failure, not pasted) supports no claim about
+  // what the site does or does not publish.
+  if (!s.sitemapExists && s.robotsSitemapUrls.length === 0 && !s.sitemapUnknown && !s.robotsUnknown) {
     out.push({
       severity: 3,
       status: 'flaw',
@@ -311,7 +326,7 @@ function verdicts(s: Signals): Verdict[] {
         snippet: `Sitemap: ${s.origin}/sitemap.xml`,
       },
     });
-  } else if (s.sitemapExists && s.robotsSitemapUrls.length === 0) {
+  } else if (s.sitemapExists && s.robotsSitemapUrls.length === 0 && !s.robotsUnknown) {
     out.push({
       severity: 2,
       status: 'flaw',
@@ -373,6 +388,22 @@ function verdicts(s: Signals): Verdict[] {
   }
 
   if (out.length === 0) {
+    // "robots.txt permits crawling" is a claim about a document. When that
+    // document was never answered, the homepage findings still stand (no
+    // noindex was measured from real bytes) yet the crawlability verdict
+    // itself cannot be reached, so the check abstains instead of vouching
+    // for bytes it never saw.
+    if (s.robotsUnknown) {
+      out.push({
+        severity: 0,
+        status: 'unverified',
+        detail:
+          'No noindex is on the homepage, but robots.txt could not be read here, ' +
+          'so whether a crawler is allowed in was not judged. ' +
+          sitemapSentence(s),
+      });
+      return out;
+    }
     // "a sitemap lists 0 URLs" was printed on a real scan for a site that HAS
     // a sitemap, at the address its own robots.txt declares. Zero is not a
     // count here, it is the absence of one, and the sentence has to say which.
@@ -581,6 +612,8 @@ export const crawlIndexCheck: FlawCheck = {
       robotsExists: robotsOk,
       robotsDisallowsAll: parsedRobots.disallowsAll,
       robotsSitemapUrls: parsedRobots.sitemaps,
+      robotsUnknown: documentStatus(robots.ref) === 'unknown',
+      sitemapUnknown: documentStatus(sitemap.ref) === 'unknown',
       sitemapExists: sitemapOk,
       sitemapIsIndex,
       sitemapChildCount: childCount,
@@ -636,6 +669,12 @@ export const crawlIndexCheck: FlawCheck = {
       confirmation: 'remote',
       fix: verdict.fix,
       variant: verdict.variant,
+      // The one unverified verdict this path produces is the unanswered
+      // robots.txt. Naming it tells the reconciling operator what to paste.
+      unverifiedNote:
+        verdict.status === 'unverified'
+          ? 'robots.txt could not be read in this pass, and crawl access cannot be judged without it.'
+          : undefined,
     };
   },
 };
