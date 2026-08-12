@@ -367,8 +367,12 @@ export const VERDICT_COPY: Record<string, VerdictCopy> = {
     phrase: 'a phone number printed as plain text with no tap-to-call link in the markup',
   },
   'booking-path:no-phone': {
-    short: 'A visitor who would rather call finds no phone number anywhere on your page.',
-    phrase: 'a page where a visitor who would rather call finds no phone number at all',
+    short: 'A visitor who would rather call finds no phone number anywhere on your homepage.',
+    phrase: 'a homepage where a visitor who would rather call finds no phone number at all',
+  },
+  'booking-path:phone-in-markup-only': {
+    short: 'Your phone number lives only in the page markup, where no visitor sees it and no tap-to-call link carries it.',
+    phrase: 'a phone number that lives only in the page markup, invisible to a visitor and never tappable',
   },
   'booking-path:phone-only': {
     short: 'Calling is the only way your page offers to reach you, and anyone who would rather write is stuck.',

@@ -386,7 +386,9 @@ export function scoreLlmsTxt(
 
 /**
  * 20 points. Splits: Organization/LocalBusiness 8, WebSite 3, sameAs 3,
- * founder or a real human Person 4, stable @id 2.
+ * a founder property AND a real human Person 4, stable @id 2. (The band
+ * needs both: the org claiming a founder and a human node backing it. An
+ * earlier version of this comment said "or", which the code never did.)
  *
  * OBSERVED anchor: Org + WebSite + SearchAction with sameAs but no founder and
  * no human Person scored 14. 8 + 3 + 3 = 14.
@@ -415,20 +417,45 @@ export function scoreEntitySchema(nodes: Node[], businessName: string): ItemResu
   const org = nodes.find((n) => {
     const ts = typesOf(n);
     if (ts.some((t) => BUSINESS_TYPES.has(t) || t.endsWith('business') || t.endsWith('store'))) return true;
+    // The telephone/address fallback must never elect a Person: humans carry
+    // both properties too, and a Person elected as the business hands its
+    // sameAs and @id readings to the wrong node.
+    if (ts.includes('person')) return false;
     return typeof n['telephone'] === 'string' || typeof n['address'] === 'object';
   });
   const website = hasType(nodes, 'website');
   const sameAs = org && Array.isArray(org['sameAs']) && (org['sameAs'] as unknown[]).length > 0;
   const hasId = Boolean(org && typeof org['@id'] === 'string');
 
-  // A Person node whose name is the SITE name is not a human. The delivered
-  // scan caught exactly this: two Person nodes both named after the site.
+  /**
+   * A Person node whose name is the SITE name is usually not a human: the
+   * delivered scan caught two Person nodes both named after the site. But a
+   * sole proprietorship is named after its human on purpose, and a live
+   * self-scan showed the equality test denying exactly that: a Person named
+   * after the business, carrying jobTitle, worksFor and knowsAbout, with the
+   * organization's own founder pointing back at it by @id, reported as "no
+   * human Person node". Name equality is a soft signal, not a disqualifier:
+   * a same-named Person still counts when it carries properties only a human
+   * profile states, or when the org's founder references its @id.
+   */
   const people = nodes.filter((n) => typesOf(n).includes('person'));
+  const founderRaw = org ? org['founder'] : undefined;
+  const founderId =
+    typeof founderRaw === 'string'
+      ? founderRaw
+      : founderRaw && typeof founderRaw === 'object'
+        ? (founderRaw as Node)['@id']
+        : undefined;
+  const HUMAN_ONLY_PROPS = ['jobtitle', 'worksfor', 'knowsabout', 'alumniof', 'birthdate'];
+  const looksHuman = (p: Node): boolean =>
+    Object.keys(p).some((k) => HUMAN_ONLY_PROPS.includes(k.toLowerCase())) ||
+    (typeof founderId === 'string' && founderId !== '' && p['@id'] === founderId);
   const realPerson = people.some((p) => {
     const nm = typeof p['name'] === 'string' ? p['name'].trim() : '';
-    return nm.length > 0 && nm.toLowerCase() !== businessName.toLowerCase() && /\s/.test(nm);
+    if (nm.length === 0 || !/\s/.test(nm)) return false;
+    return nm.toLowerCase() !== businessName.toLowerCase() || looksHuman(p);
   });
-  const founder = Boolean(org && org['founder']);
+  const founder = Boolean(founderRaw);
 
   let earned = 0;
   const have: string[] = [];
@@ -536,21 +563,50 @@ export function scoreProductReview(nodes: Node[], sellsNothing: boolean): ItemRe
     };
   }
 
-  const product = hasType(nodes, 'product', 'service');
-  const offerNode = nodes.find((n) => typesOf(n).includes('offer'));
+  /**
+   * Types are collected at every depth, not only across the top of the graph.
+   *
+   * The schema.org-recommended shape for a service business nests each
+   * Service at hasOfferCatalog -> itemListElement -> itemOffered, and a live
+   * self-scan carrying eight of those was told "no Product or Service node"
+   * in the same note that credited the Offer sitting beside them (the Offer
+   * happened to reach the old code through a different door, an `offers` key
+   * on another top-level node). The two detections read the same JSON; they
+   * have to see the same depth.
+   */
+  const deepHasType = (ns: Node[], ...want: string[]): boolean => {
+    const seen = new Set<unknown>();
+    const walk = (v: unknown, depth: number): boolean => {
+      if (!v || typeof v !== 'object' || depth > 8 || seen.has(v)) return false;
+      seen.add(v);
+      if (Array.isArray(v)) return v.some((x) => walk(x, depth + 1));
+      const n = v as Node;
+      if (typesOf(n).some((t) => want.includes(t))) return true;
+      return Object.values(n).some((x) => walk(x, depth + 1));
+    };
+    return ns.some((n) => walk(n, 0));
+  };
+
+  const product = deepHasType(nodes, 'product', 'service');
   // A bare `offers` KEY is not an Offer. `{"@type":"Product","offers":null}`
   // and `"offers":[]` used to earn the full 8 points for a priced offer, which
   // inflates the shipped number above what the prospect can reproduce from
   // their own source, the more dangerous direction for this tool. Require an
-  // actual object or a non-empty array.
+  // actual object or a non-empty array. The deep walk keeps that guard: a
+  // null or empty `offers` contains no node typed Offer, so it still earns
+  // nothing; the isRealOffer path stays for markup that nests a priced object
+  // under `offers` without typing it.
   const isRealOffer = (o: unknown): boolean =>
     Array.isArray(o)
       ? o.some((x) => x !== null && typeof x === 'object')
       : typeof o === 'object' && o !== null && Object.keys(o as object).length > 0;
   const nested = nodes.some((n) => isRealOffer(n['offers']));
-  const hasOffer = Boolean(offerNode) || nested;
+  const hasOffer = deepHasType(nodes, 'offer') || nested;
 
-  const selfReview = nodes.some((n) => typesOf(n).some((t) => t === 'aggregaterating' || t === 'review'));
+  // Deep for the same reason as the types above: rating markup conventionally
+  // nests inside the Product or Organization it rates, so a top-level walk
+  // missed exactly the shape the advisory exists to warn about.
+  const selfReview = deepHasType(nodes, 'aggregaterating', 'review');
 
   let earned = 0;
   if (product) earned += 7;
