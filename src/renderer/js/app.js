@@ -928,11 +928,14 @@ function renderConfirmSection(container, data) {
   ];
 
   // Additional same-origin pages the crawler read and scored, offered as paste
-  // slots so a multi-page site's site-wide score can be reproduced from the
-  // operator's own source. The list rides on the ai-readiness finding; a
+  // slots so multi-page findings can be reproduced from the operator's own
+  // source. Collected across EVERY finding: ai-readiness lists the pages its
+  // score read, and booking-path lists the contact page it followed. A
   // single-page site has none, so no extra boxes appear.
-  const aiFinding = data.findings.find((f) => f.checkId === 'ai-readiness');
-  const pageDefs = (aiFinding && Array.isArray(aiFinding.extraPages) ? aiFinding.extraPages : []).map((u) => {
+  const pageUrls = [...new Set(
+    data.findings.flatMap((f) => (Array.isArray(f.extraPages) ? f.extraPages : []))
+  )];
+  const pageDefs = pageUrls.map((u) => {
     let label = u;
     try {
       label = new URL(u).pathname || u;
