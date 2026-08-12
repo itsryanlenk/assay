@@ -65,6 +65,15 @@ packet workflow, hardened and audited, but not yet tagged.
 
 ### Fixed
 
+- A placeholder marker only counts on a page thin enough to be a
+  placeholder. "Coming soon" inside one of a news homepage's article
+  headlines made the website check call a 342-kilobyte content site "a
+  placeholder rather than a business site" at severity 3, and because the
+  operator's own paste reproduced the false verdict, a real
+  crawler-refused-but-browser-fine divergence turned into a blocked packet.
+  Marker phrases on a page with real reading material are editorial content;
+  they count only under a visible-text ceiling every real parked page sits
+  inside.
 - A perfect score stops recommending a fix. At 100/100 the fix band printed
   "Biggest single gain is AI crawlers allowed: 0 of 25 points are unclaimed",
   and the owner page opened every block with the total-absence copy directly

@@ -1117,6 +1117,54 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
 
 }
 
+// From a live scan: a 342-kilobyte news homepage carried "Coming Soon" inside
+// one of its article headlines, and the website check called the whole page "a
+// placeholder rather than a business site" at severity 3. The operator's own
+// paste then diverged against the crawler's measured refusal and blocked the
+// packet. A placeholder page has almost nothing else to say, so a parked
+// marker only means something on a page that is thin.
+async function websiteParkedEndToEnd() {
+  const WS = require(path.join(ROOT, 'dist/main/main/checks/website.js'));
+  const cand = {
+    name: 'Sample Signal Press', address: '', phone: null,
+    website: 'https://samplesignal.test', source: 'google-places-new',
+  };
+  const cap = (body) => ({
+    ref: {
+      id: 'w', url: 'https://samplesignal.test/', requestedUrl: 'https://samplesignal.test',
+      source: 'crawler', method: 'GET', httpStatus: 200, contentType: 'text/html',
+      fetchedAt: new Date().toISOString(), sha256: 'd'.repeat(64),
+      byteLength: body.length, storedPath: '(test)',
+    },
+    body, captured: true,
+  });
+  const ctxOf = (body) => ({
+    candidate: cand, scanId: 'parked', evidenceRoot: '(unused)',
+    agent: { run: async () => ({ ok: false, text: '' }) },
+    fetch: async () => cap(body),
+  });
+
+  const RICH =
+    '<html><head><title>Tech News Daily - Sample Signal Press</title></head><body>' +
+    '<h1>Sample Signal Press</h1>' +
+    '<h2>Messenger Premium Version is Coming Soon, Confirms CEO</h2>' +
+    '<p>' + 'Coverage of devices, platforms and the people who build them. '.repeat(60) + '</p>' +
+    '<h2>More headlines from this week</h2>' +
+    '<p>' + 'Reviews, tutorials and buying guides published every day. '.repeat(40) + '</p>' +
+    '</body></html>';
+  const rich = await WS.websiteCheck.run(ctxOf(RICH));
+  eq('run(): a marker inside one headline never makes a rich page a placeholder',
+    /placeholder/i.test(rich.detail), false);
+  eq('run(): the rich page reads as a working site', rich.status, 'ok');
+
+  const THIN =
+    '<html><head><title>samplesignal.test</title></head><body>' +
+    '<p>Coming soon. This site is under construction.</p></body></html>';
+  const thin = await WS.websiteCheck.run(ctxOf(THIN));
+  eq('run(): a thin page carrying the marker is still a placeholder',
+    /placeholder/i.test(thin.detail), true);
+}
+
 // run(): the raw-source phone signal is wired from the real capture, not only
 // a fixture. Joined to the async tail below, never a floating promise: a
 // floating one races the report and its assertions could land after the exit.
@@ -1849,6 +1897,7 @@ Promise.resolve()
   .then(urlCandidateRunEndToEnd)
   .then(bookingPathRunEndToEnd)
   .then(bookingContactHopEndToEnd)
+  .then(websiteParkedEndToEnd)
   .catch((err) => failures.push(`an end-to-end run threw\n      ${err && err.stack ? err.stack : err}`))
   .then(() => {
     console.log('\n--- PARSER TESTS ---');

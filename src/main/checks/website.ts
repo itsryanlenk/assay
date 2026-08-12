@@ -37,7 +37,15 @@ import { Candidate, FlawFinding, FlawFix, Severity } from '../../shared/types';
 import { CheckContext, FlawCheck } from './types';
 import { cleanHeadline } from './headline';
 
-/** Markers that a page is a placeholder rather than a business site. Matched case-insensitively. */
+/**
+ * Markers that a page is a placeholder rather than a business site. Matched
+ * case-insensitively, and ONLY on a page thin enough for them to mean
+ * anything; see PARKED_VISIBLE_CHARS_MAX. A live scan matched "coming soon"
+ * inside one of a news homepage's article headlines and called a
+ * 342-kilobyte page with tens of posts "a placeholder rather than a business
+ * site" at severity 3, which the operator's own paste then reproduced,
+ * turning a real crawler-refusal divergence into a blocked packet.
+ */
 const PARKED_MARKERS = [
   'this domain is for sale',
   'domain is for sale',
@@ -55,6 +63,17 @@ const PARKED_MARKERS = [
   'parked domain',
   'account suspended',
 ];
+
+/**
+ * The most visible text a placeholder page carries. Real parked and
+ * coming-soon pages are a sentence or two plus registrar boilerplate, a few
+ * hundred characters; the thin-content verdict below already treats anything
+ * under a few hundred as saying nothing. 2000 keeps every real placeholder
+ * inside the net with room to spare, while a content site clears it by an
+ * order of magnitude, so a marker phrase sitting in its articles never
+ * reads as the page's own status.
+ */
+const PARKED_VISIBLE_CHARS_MAX = 2000;
 
 const SOCIAL_HOSTS = [
   'facebook.com',
@@ -420,7 +439,14 @@ export const websiteCheck: FlawCheck = {
       visibleChars: text.length,
       scriptCount: (html.match(/<script\b/gi) ?? []).length,
       title: extractTitle(html),
-      parkedMarkers: PARKED_MARKERS.filter((m) => text.toLowerCase().includes(m)),
+      // A placeholder page has almost nothing else to say. On a page with
+      // real reading material, these phrases are editorial content: an
+      // article about a launch, a post about a hosting company. The marker
+      // counts only when the page is thin enough to BE a placeholder.
+      parkedMarkers:
+        text.length <= PARKED_VISIBLE_CHARS_MAX
+          ? PARKED_MARKERS.filter((m) => text.toLowerCase().includes(m))
+          : [],
       socialHost: finalHost && SOCIAL_HOSTS.some((h) => finalHost === h || finalHost.endsWith(`.${h}`)) ? finalHost : null,
       redirectHops: capture.ref.redirectChain?.length ?? 0,
       httpsUpgraded: listed.startsWith('http://') && capture.ref.url.startsWith('https://'),
