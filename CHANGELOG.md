@@ -72,10 +72,13 @@ packet workflow, hardened and audited, but not yet tagged.
   The failed load itself still diverges when the browser loads fine, because
   that was measured on both sides and is worth raising.
 - The crawl and index check no longer claims "there is no sitemap.xml and
-  robots.txt declares none" from requests that were never answered. A timeout,
-  a store failure or a missing paste reads as unknown rather than absent, and
-  an unanswered robots.txt makes the check abstain instead of vouching for
-  crawl access it never saw.
+  robots.txt declares none" from requests that were never answered. In the
+  crawler pass a timeout or a store failure reads as unknown rather than
+  absent, and an unanswered robots.txt or sitemap makes the check abstain
+  instead of vouching for documents it never read. The reconciling pass keeps
+  its absence semantics on purpose: a sitemap that does not exist cannot be
+  view-sourced, so an empty optional paste slot reproduces a measured 404 and
+  the no-sitemap finding stays confirmable.
 - The approval ledger keys a row to the prospect rather than to the folder
   slug. The slug is built from the business name, the town and the contact
   name, so changing any of them left every earlier row outside the supersede

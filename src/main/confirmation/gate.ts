@@ -34,6 +34,7 @@ import {
   FlawFinding,
   PasteKind,
   RunCheckResponse,
+  isMeasuredStatus,
 } from '../../shared/types';
 import { AgentProvider } from '../agent/provider';
 import { RawCapture, captureFilename, documentStatus } from '../evidence/fetch-raw';
@@ -301,6 +302,24 @@ export async function confirm(
     return out;
   };
 
+  /**
+   * Holds a finding at 'remote' with the given note fragments appended after
+   * any note it already carries. 'remote' blocks release exactly as
+   * 'diverged' does; the difference is that remote is clearable and the note
+   * tells the operator what would clear it. One joiner, because the spacing
+   * and ordering rule was copied into three branches once and each copy is a
+   * place for the next edit to miss.
+   */
+  const holdRemote = (base: FlawFinding, ...notes: (string | undefined)[]): void => {
+    findings.push({
+      ...base,
+      confirmation: 'remote',
+      unverifiedNote: [base.unverifiedNote, ...notes]
+        .filter((n): n is string => typeof n === 'string' && n.trim() !== '')
+        .join(' '),
+    });
+  };
+
   for (const crawlerFinding of crawlerRun.findings) {
     const opFinding = operatorRun.findings.find((f) => f.checkId === crawlerFinding.checkId);
 
@@ -324,18 +343,28 @@ export async function confirm(
       (e) => e.source === 'operator-browser' && e.sha256 !== '' && e.storedPath !== ''
     );
     if (!opFinding || !readAnyPaste) {
-      findings.push({
-        ...crawlerFinding,
-        confirmation: 'remote',
-        unverifiedNote:
-          (crawlerFinding.unverifiedNote ? crawlerFinding.unverifiedNote + ' ' : '') +
-          'No operator paste covered the document this finding rests on, so it is still unconfirmed.',
-      });
+      holdRemote(
+        crawlerFinding,
+        'No operator paste covered the document this finding rests on, so it is still unconfirmed.'
+      );
       continue;
     }
 
+    /**
+     * Only two MEASUREMENTS can agree, just as only two can diverge (see
+     * isMeasuredStatus). Two passes that both abstained at severity 0 used
+     * to satisfy this comparison and ship a finding whose own words say
+     * "could not be judged" under the label operator-confirmed, the app's
+     * strongest provenance stamped on a claim nobody made. Abstentions fall
+     * through to the branches below, which hold them at 'remote'.
+     */
+    const crawlerMeasured = isMeasuredStatus(crawlerFinding.status);
+    const opMeasured = isMeasuredStatus(opFinding.status);
     const agrees =
-      opFinding.status === crawlerFinding.status && opFinding.severity === crawlerFinding.severity;
+      crawlerMeasured &&
+      opMeasured &&
+      opFinding.status === crawlerFinding.status &&
+      opFinding.severity === crawlerFinding.severity;
 
     if (agrees) {
       /**
@@ -392,15 +421,12 @@ export async function confirm(
     // corrected from a fabricated diagnosis to an actionable one.
     const skipped = unreconciledDocs(crawlerFinding);
     if (skipped.length) {
-      findings.push({
-        ...crawlerFinding,
-        confirmation: 'remote',
-        unverifiedNote:
-          (crawlerFinding.unverifiedNote ? crawlerFinding.unverifiedNote + ' ' : '') +
-          `The crawler read ${skipped.join(', ')}, which you did not paste, so this score could not be ` +
+      holdRemote(
+        crawlerFinding,
+        `The crawler read ${skipped.join(', ')}, which you did not paste, so this score could not be ` +
           'fully reconciled against your own source. Paste the missing document(s) or page(s) and confirm ' +
-          'again to settle whether it holds.',
-      });
+          'again to settle whether it holds.'
+      );
       continue;
     }
 
@@ -410,7 +436,9 @@ export async function confirm(
      * an abstention cannot contradict a verdict. There is no reading to void
      * and no cloaking to allege. 'diverged' is also terminal, no paste can
      * ever clear it, so mislabelling an abstention stranded the packet with
-     * every document faithfully supplied.
+     * every document faithfully supplied. ('disqualified' is neither side of
+     * this: it is candidate-driven, both passes see the same candidate, so it
+     * always agrees with itself and never reaches these branches today.)
      *
      * Crawler abstained, operator measured: the operator's verdict ships as
      * itself, confirmed. It was measured entirely from their own pasted
@@ -418,30 +446,28 @@ export async function confirm(
      * already scope its words to exactly what was pasted. This is the site
      * that times out for crawlers and pastes fine, which a live scan hit.
      */
-    const measured = (s: string): boolean => s === 'ok' || s === 'flaw';
-    if (!measured(crawlerFinding.status) && measured(opFinding.status)) {
+    if (!crawlerMeasured && opMeasured) {
       findings.push({ ...opFinding, confirmation: 'operator-confirmed' });
       continue;
     }
 
     /**
-     * Operator pass abstained (about anything the crawler's status may be):
-     * still not a divergence, the operator's own source made no contrary
-     * claim. Hold the crawler's reading at 'remote', which blocks release
-     * exactly as 'diverged' did, and tell the operator what would settle it
-     * instead of accusing the site of answering crawlers differently.
+     * Operator pass abstained: still not a divergence, the operator's own
+     * source made no contrary claim. Hold the crawler finding at 'remote'
+     * and tell the operator what would settle it instead of accusing the
+     * site of answering crawlers differently. The sentence stays neutral
+     * about the crawler side on purpose: this branch also catches the case
+     * where BOTH passes abstained with different statuses, where there is no
+     * crawler reading to speak of.
      */
-    if (!measured(opFinding.status)) {
-      findings.push({
-        ...crawlerFinding,
-        confirmation: 'remote',
-        unverifiedNote:
-          (crawlerFinding.unverifiedNote ? crawlerFinding.unverifiedNote + ' ' : '') +
-          'Your pasted source was not enough for this check to reach a verdict, so the ' +
-          "crawler's reading stays unconfirmed rather than contradicted. " +
-          (opFinding.unverifiedNote ? opFinding.unverifiedNote + ' ' : '') +
-          'Paste the document(s) this check reads and confirm again.',
-      });
+    if (!opMeasured) {
+      holdRemote(
+        crawlerFinding,
+        'Reconciling from your pasted source could not reach a verdict on this check, so nothing was ' +
+          'confirmed and nothing was contradicted.',
+        opFinding.unverifiedNote,
+        'Paste the document(s) this check reads and confirm again.'
+      );
       continue;
     }
 

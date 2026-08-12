@@ -39,8 +39,21 @@ import { documentStatus, type RawCapture } from '../evidence/fetch-raw';
 const MAX_CHILD_SITEMAPS = 4;
 import { cleanHeadline } from './headline';
 
-/** `variant` names the verdict shape so the hook copy can be keyed on it; see FlawFinding.variant. */
-type Verdict = { severity: Severity; status: FlawFinding['status']; detail: string; fix?: FlawFix; variant?: string };
+/**
+ * `variant` names the verdict shape so the hook copy can be keyed on it; see
+ * FlawFinding.variant. `note` becomes the finding's unverifiedNote, defined
+ * beside the detail it explains: an earlier version attached the note at the
+ * return site keyed on `status === 'unverified'`, which held only while
+ * verdicts() produced exactly one unverified shape.
+ */
+type Verdict = {
+  severity: Severity;
+  status: FlawFinding['status'];
+  detail: string;
+  fix?: FlawFix;
+  variant?: string;
+  note?: string;
+};
 
 type Signals = {
   origin: string;
@@ -53,14 +66,17 @@ type Signals = {
   robotsDisallowsAll: boolean;
   robotsSitemapUrls: string[];
   /**
-   * True when the document was never ANSWERED: a transport failure, a store
-   * failure, or (in the reconciling pass) simply not pasted. documentStatus
-   * calls this 'unknown', and it is a different fact from 'absent': a 404 is
-   * evidence there is no robots.txt, a timeout is evidence of nothing. The
-   * absence verdicts below and the "robots.txt permits crawling" claim all
-   * require an answer, or the check is claiming to have read bytes it never
-   * saw. That exact shape put "There is no sitemap.xml and robots.txt
-   * declares none" on a reconciling pass whose operator had pasted neither.
+   * True when the document was never ANSWERED. documentStatus calls this
+   * 'unknown', and it is a different fact from 'absent': a 404 is evidence
+   * there is no robots.txt, a timeout is evidence of nothing. The absence
+   * verdicts below and the "robots.txt permits crawling" claim all require
+   * an answer, or the check is claiming to have read bytes it never saw.
+   * That exact shape put "There is no sitemap.xml and robots.txt declares
+   * none" on a reconciling pass whose operator had pasted neither.
+   *
+   * The two flags are set differently and the difference is load-bearing;
+   * see the assignment site in run() for why the reconciling pass keeps
+   * `sitemapUnknown` false for an unpasted sitemap.
    */
   robotsUnknown: boolean;
   sitemapUnknown: boolean;
@@ -392,29 +408,41 @@ function verdicts(s: Signals): Verdict[] {
     // document was never answered, the homepage findings still stand (no
     // noindex was measured from real bytes) yet the crawlability verdict
     // itself cannot be reached, so the check abstains instead of vouching
-    // for bytes it never saw.
+    // for bytes it never saw. Same rule one document over: an unanswered
+    // sitemap request used to fall through to the clean verdict, converting
+    // a possibly-real severity-3 flaw into a clean bill off a timeout.
     if (s.robotsUnknown) {
       out.push({
         severity: 0,
         status: 'unverified',
         detail:
-          'No noindex is on the homepage, but robots.txt could not be read here, ' +
+          'The homepage carries no noindex. robots.txt could not be read here, ' +
           'so whether a crawler is allowed in was not judged. ' +
           sitemapSentence(s),
+        note: 'This check needs a readable robots.txt to judge crawl access.',
       });
-      return out;
+    } else if (s.sitemapUnknown) {
+      out.push({
+        severity: 0,
+        status: 'unverified',
+        detail:
+          'The homepage carries no noindex and robots.txt permits crawling. ' +
+          'The request for the sitemap was never answered, so whether this site has one was not judged.',
+        note: 'The request for the sitemap was never answered, and this check cannot finish without that answer.',
+      });
+    } else {
+      // "a sitemap lists 0 URLs" was printed on a real scan for a site that HAS
+      // a sitemap, at the address its own robots.txt declares. Zero is not a
+      // count here, it is the absence of one, and the sentence has to say which.
+      // See sitemapSentence for the second version of the same mistake.
+      out.push({
+        severity: 0,
+        status: 'ok',
+        detail:
+          'A crawler can get in: no noindex and robots.txt permits crawling. ' +
+          sitemapSentence(s),
+      });
     }
-    // "a sitemap lists 0 URLs" was printed on a real scan for a site that HAS
-    // a sitemap, at the address its own robots.txt declares. Zero is not a
-    // count here, it is the absence of one, and the sentence has to say which.
-    // See sitemapSentence for the second version of the same mistake.
-    out.push({
-      severity: 0,
-      status: 'ok',
-      detail:
-        'A crawler can get in: no noindex and robots.txt permits crawling. ' +
-        sitemapSentence(s),
-    });
   }
 
   return out;
@@ -480,17 +508,25 @@ export const crawlIndexCheck: FlawCheck = {
       ctx.fetch(`${origin}/robots.txt`),
     ]);
 
+    // One reading per document. documentStatus was being recomputed at every
+    // consulting site over the same immutable ref, which is wasted URL parsing
+    // and, worse, lets two derived facts about one document drift apart the
+    // day one call site is edited.
+    const robotsStatus = documentStatus(robots.ref);
+
     // robots.txt names the sitemap. Assuming /sitemap.xml made this check
     // report "a sitemap lists 0 URLs" on a real site whose robots.txt pointed
     // at /sitemap_index.xml, the WordPress and Yoast default. The directive was
     // already being parsed into robotsSitemapUrls and simply never followed.
-    const declaredSitemaps = documentStatus(robots.ref) === 'present'
+    const declaredSitemaps = robotsStatus === 'present'
       ? [...robots.body.matchAll(/^\s*sitemap:\s*(\S+)/gim)].map((m) => (m[1] ?? '').trim()).filter(Boolean)
       : [];
     let sitemap = await ctx.fetch(declaredSitemaps[0] ?? `${origin}/sitemap.xml`);
     if (documentStatus(sitemap.ref) !== 'present' && declaredSitemaps[0]) {
       sitemap = await ctx.fetch(`${origin}/sitemap.xml`);
     }
+    // After the fallback refetch, so it reads the capture the verdicts read.
+    const sitemapStatus = documentStatus(sitemap.ref);
 
     // The homepage has to be readable before anything can be said about what
     // it does or does not contain. Without this gate a failed fetch became
@@ -548,11 +584,10 @@ export const crawlIndexCheck: FlawCheck = {
     // HTTP 200. Parsing that HTML as robots.txt or as XML produces confident
     // nonsense, so presence is decided by documentStatus, not by the status
     // code alone.
-    const robotsOk = documentStatus(robots.ref) === 'present' && robots.body.trim() !== '';
+    const robotsOk = robotsStatus === 'present' && robots.body.trim() !== '';
     const parsedRobots = robotsOk ? parseRobots(robots.body) : { disallowsAll: false, sitemaps: [] };
 
-    const sitemapOk =
-      documentStatus(sitemap.ref) === 'present' && /<(urlset|sitemapindex)\b/i.test(sitemap.body);
+    const sitemapOk = sitemapStatus === 'present' && /<(urlset|sitemapindex)\b/i.test(sitemap.body);
 
     /**
      * Resolve one level of <sitemapindex> before counting anything.
@@ -612,8 +647,21 @@ export const crawlIndexCheck: FlawCheck = {
       robotsExists: robotsOk,
       robotsDisallowsAll: parsedRobots.disallowsAll,
       robotsSitemapUrls: parsedRobots.sitemaps,
-      robotsUnknown: documentStatus(robots.ref) === 'unknown',
-      sitemapUnknown: documentStatus(sitemap.ref) === 'unknown',
+      robotsUnknown: robotsStatus === 'unknown',
+      /**
+       * The reconciling pass reads every document the operator did not paste
+       * as 'unknown', and for the OPTIONAL sitemap that is not uncertainty,
+       * it is the reproduction of absence: a document that does not exist
+       * cannot be view-sourced, so an empty paste slot is what agreement
+       * with a measured 404 looks like. Treating it as unknown there turned
+       * the reconciling pass into a measured "ok" that falsely DIVERGED
+       * against the crawler's no-sitemap flaw, stranding the commonest hook
+       * this check raises behind an accusation no paste can clear.
+       * ai-readiness states the same rule where it declines to refuse the
+       * number in the reconciling pass. robots.txt is a REQUIRED paste, so
+       * an unanswered robots stays an abstention in both passes.
+       */
+      sitemapUnknown: sitemapStatus === 'unknown' && !ctx.reconciling,
       sitemapExists: sitemapOk,
       sitemapIsIndex,
       sitemapChildCount: childCount,
@@ -669,12 +717,8 @@ export const crawlIndexCheck: FlawCheck = {
       confirmation: 'remote',
       fix: verdict.fix,
       variant: verdict.variant,
-      // The one unverified verdict this path produces is the unanswered
-      // robots.txt. Naming it tells the reconciling operator what to paste.
-      unverifiedNote:
-        verdict.status === 'unverified'
-          ? 'robots.txt could not be read in this pass, and crawl access cannot be judged without it.'
-          : undefined,
+      // Defined on the verdict, beside the detail it explains; see Verdict.note.
+      unverifiedNote: verdict.note,
     };
   },
 };

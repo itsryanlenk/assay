@@ -57,6 +57,19 @@ const PAGE_DATED = PAGE_UNDATED.replace(
 
 const ROBOTS = 'User-agent: *\nAllow: /\n\nSitemap: https://example-shop.test/sitemap.xml\n';
 
+/** A capture for a request that was never answered: timeout, dead host. */
+function deadCapture(url) {
+  return {
+    ref: {
+      id: url, url, requestedUrl: url, source: 'crawler', method: 'GET',
+      httpStatus: null, contentType: null, fetchedAt: new Date().toISOString(),
+      sha256: '', byteLength: 0, storedPath: '',
+      transportError: 'timed out after 15000ms',
+    },
+    body: '', captured: false,
+  };
+}
+
 async function crawlerRunFrom(html) {
   const cap = (url) => ({
     ref: {
@@ -127,20 +140,11 @@ async function crawlerRunFrom(html) {
   // from the operator's own bytes is exactly what "operator-confirmed" means.
   // This used to read as DIVERGED, which is terminal: no paste can ever clear
   // it, so the packet stayed unreleasable with every document faithfully
-  // supplied - the one operator in the whole flow who did everything right.
+  // supplied, for the one operator in the whole flow who did everything right.
   {
-    const dead = (url) => ({
-      ref: {
-        id: url, url, requestedUrl: url, source: 'crawler', method: 'GET',
-        httpStatus: null, contentType: null, fetchedAt: new Date().toISOString(),
-        sha256: '', byteLength: 0, storedPath: '',
-        transportError: 'timed out after 15000ms',
-      },
-      body: '', captured: false,
-    });
     const blockedCrawler = await runChecks(
       { candidate, scanId: 'dead' },
-      { agent: deadAgent, evidenceRoot: EV, fetchOverride: async (u) => dead(u) }
+      { agent: deadAgent, evidenceRoot: EV, fetchOverride: async (u) => deadCapture(u) }
     );
 
     // Pin the shape the assertions below depend on, so they cannot pass or
@@ -170,7 +174,7 @@ async function crawlerRunFrom(html) {
       oFresh && `${oFresh.status}, fix ${oFresh.fix ? 'present' : 'missing'}`);
 
     const oAi = afterOutage.findings.find((f) => f.checkId === 'ai-readiness');
-    ok('a score measured from the operator own bytes confirms',
+    ok("a score measured from the operator's own bytes confirms",
       !!oAi && oAi.confirmation === 'operator-confirmed' && !!oAi.score,
       oAi && `${oAi.confirmation}, score ${oAi.score ? oAi.score.rescaled : 'none'}`);
 
@@ -178,15 +182,133 @@ async function crawlerRunFrom(html) {
       !afterOutage.divergences.some((d) => d.checkId !== 'website'),
       JSON.stringify(afterOutage.divergences.map((d) => d.checkId)));
 
-    // The one check that MEASURED - the crawler timed out, the browser loads
-    // fine - keeps its divergence. That signal is real and worth raising.
+    // The one check that MEASURED (the crawler timed out, the browser loads
+    // fine) keeps its divergence. That signal is real and worth raising.
     const oWeb = afterOutage.findings.find((f) => f.checkId === 'website');
     ok('the measured failed-load still diverges against a working browser',
       !!oWeb && oWeb.confirmation === 'diverged', oWeb && `got ${oWeb.confirmation}`);
 
+    const outageRelease = G.releasable(afterOutage.findings, afterOutage.confirmedAt);
     ok('the packet is releasable once every measured claim is operator-confirmed',
-      G.releasable(afterOutage.findings, afterOutage.confirmedAt).ok === true,
-      JSON.stringify(G.releasable(afterOutage.findings, afterOutage.confirmedAt)));
+      outageRelease.ok === true, JSON.stringify(outageRelease));
+
+    // 2f. The label discipline in the other direction: pastes that cover only
+    // part of the document set leave the uncovered checks ABSTAINED on both
+    // sides. Two agreeing abstentions used to satisfy the status+severity
+    // comparison and ship "operator-confirmed" on a finding whose own words
+    // say nothing was judged.
+    const halfPaste = await G.confirm(candidate, blockedCrawler, [
+      { kind: 'homepage', url: 'https://example-shop.test', content: PAGE_UNDATED },
+    ], { agent: deadAgent, evidenceRoot: EV, scanId: 'dead2' });
+    const bothAbstained = halfPaste.findings.find((f) => f.checkId === 'crawl-index');
+    ok('two agreeing abstentions are never labelled operator-confirmed',
+      !!bothAbstained && bothAbstained.confirmation !== 'operator-confirmed',
+      bothAbstained && `${bothAbstained.status}: ${bothAbstained.confirmation}`);
+    ok('the double abstention stays remote with a way forward',
+      !!bothAbstained && bothAbstained.confirmation === 'remote' &&
+        /confirm again/i.test(bothAbstained.unverifiedNote || ''),
+      bothAbstained && `${bothAbstained.confirmation}: ${bothAbstained.unverifiedNote}`);
+  }
+
+  // --- 2d. A site with genuinely NO sitemap still confirms its flaw --------
+  // The crawler MEASURED the absence: robots.txt answered with no Sitemap
+  // line, /sitemap.xml answered 404. The operator pastes homepage and robots,
+  // the whole required set, and cannot paste a sitemap because no such
+  // document exists; an empty optional paste slot IS the reproduction of a
+  // measured 404. The reconciling pass must reach the same flaw and confirm,
+  // not report a measured "ok" that falsely diverges. This is the commonest
+  // crawl-index hook, and the packet must survive it.
+  {
+    const ROBOTS_BARE = 'User-agent: *\nAllow: /\n';
+    const gone = (url) => ({
+      ref: {
+        id: url, url, requestedUrl: url, source: 'crawler', method: 'GET', httpStatus: 404,
+        contentType: 'text/html', fetchedAt: new Date().toISOString(),
+        sha256: require('node:crypto').createHash('sha256').update('gone' + url).digest('hex'),
+        byteLength: 0, storedPath: '(test)',
+      },
+      body: '', captured: true,
+    });
+    const live = (url, body, ct) => ({
+      ref: {
+        id: url, url, requestedUrl: url, source: 'crawler', method: 'GET', httpStatus: 200,
+        contentType: ct, fetchedAt: new Date().toISOString(),
+        sha256: require('node:crypto').createHash('sha256').update(url + body).digest('hex'),
+        byteLength: body.length, storedPath: '(test)',
+      },
+      body, captured: true,
+    });
+    const noSitemapFetch = async (url) => {
+      const u = url.replace(/\/+$/, '');
+      if (u === 'https://example-shop.test') return live(url, PAGE_UNDATED, 'text/html');
+      if (u.endsWith('/robots.txt')) return live(url, ROBOTS_BARE, 'text/plain');
+      if (u.endsWith('/blogs/news')) return live(url, PAGE_UNDATED, 'text/html');
+      return gone(url);
+    };
+    const crawlerNoMap = await runChecks(
+      { candidate, scanId: 'nomap' },
+      { agent: deadAgent, evidenceRoot: EV, fetchOverride: noSitemapFetch }
+    );
+    const nmCrawlCi = crawlerNoMap.findings.find((f) => f.checkId === 'crawl-index');
+    ok('SETUP: an answered 404 sitemap plus a bare robots measures the no-sitemap flaw',
+      !!nmCrawlCi && nmCrawlCi.status === 'flaw' && /no sitemap\.xml/i.test(nmCrawlCi.detail),
+      nmCrawlCi && `${nmCrawlCi.status}: ${nmCrawlCi.detail}`);
+
+    const nmConf = await G.confirm(candidate, crawlerNoMap, [
+      { kind: 'homepage', url: 'https://example-shop.test', content: PAGE_UNDATED },
+      { kind: 'robots', url: 'https://example-shop.test/robots.txt', content: ROBOTS_BARE },
+    ], { agent: deadAgent, evidenceRoot: EV, scanId: 'nomap1' });
+    const nmCi = nmConf.findings.find((f) => f.checkId === 'crawl-index');
+    ok('the no-sitemap flaw confirms on the required paste set',
+      !!nmCi && nmCi.confirmation === 'operator-confirmed' && nmCi.status === 'flaw',
+      nmCi && `${nmCi.status}: ${nmCi.confirmation} ${nmCi.divergenceNote || nmCi.unverifiedNote || ''}`);
+    ok('no crawl-index divergence is recorded for the unpasteable absence',
+      !nmConf.divergences.some((d) => d.checkId === 'crawl-index'),
+      JSON.stringify(nmConf.divergences.map((d) => d.checkId)));
+  }
+
+  // --- 2e. An unanswered sitemap request is an abstention, not a clean bill.
+  // Crawler pass only: homepage and robots answer fine, the sitemap request
+  // never does. The old code claimed "there is no sitemap.xml" off the
+  // timeout; the first fix suppressed that but fell through to "a crawler can
+  // get in" at severity 0, vouching for a document it never read. Neither
+  // sentence was measured; the check abstains. The reconciling pass keeps its
+  // absence semantics (2d above) because an unpasted optional document is a
+  // reproduced absence, not an unanswered request.
+  {
+    const { crawlIndexCheck: CI } = require(path.join(ROOT, 'dist/main/main/checks/crawl-index.js'));
+    const ROBOTS_BARE = 'User-agent: *\nAllow: /\n';
+    const mkCap = (url, body, ct) => ({
+      ref: {
+        id: url, url, requestedUrl: url, source: 'crawler', method: 'GET', httpStatus: 200,
+        contentType: ct, fetchedAt: new Date().toISOString(),
+        sha256: 'e'.repeat(64), byteLength: body.length, storedPath: '(test)',
+      },
+      body, captured: true,
+    });
+    const hangingSitemap = async (url) => {
+      const u = url.replace(/\/+$/, '');
+      if (u === 'https://example-shop.test') return mkCap(url, PAGE_UNDATED, 'text/html');
+      if (u.endsWith('/robots.txt')) return mkCap(url, ROBOTS_BARE, 'text/plain');
+      return deadCapture(url);
+    };
+    const ctxOf = (reconciling) => ({
+      candidate, scanId: 'hang', evidenceRoot: EV, agent: deadAgent,
+      fetch: hangingSitemap, reconciling,
+    });
+
+    const crawlerSide = await CI.run(ctxOf(false));
+    ok('an unanswered sitemap request makes the crawler pass abstain',
+      crawlerSide.status === 'unverified', `${crawlerSide.status}: ${crawlerSide.detail}`);
+    ok('the abstention never claims the sitemap is missing',
+      !/no sitemap\.xml/i.test(crawlerSide.detail), crawlerSide.detail);
+    ok('the abstention names the unanswered request',
+      /never answered/i.test(crawlerSide.unverifiedNote || ''), crawlerSide.unverifiedNote);
+
+    const reconcileSide = await CI.run(ctxOf(true));
+    ok('the reconciling pass reads the unpasted sitemap as a reproduced absence',
+      reconcileSide.status === 'flaw' && /no sitemap\.xml/i.test(reconcileSide.detail),
+      `${reconcileSide.status}: ${reconcileSide.detail}`);
   }
 
   // --- 2c. The reverse asymmetry: crawler measured, operator pass abstained.

@@ -230,6 +230,19 @@ export type CheckStatus =
   | 'disqualified';
 
 /**
+ * The two statuses that constitute a MEASUREMENT: a claim about the business
+ * that a reader could reproduce from the cited bytes. Everything else is an
+ * abstention ('unverified': not enough was read to judge; 'error': the check
+ * itself failed) or a routing decision ('disqualified': no website, nothing
+ * to measure). The confirmation gate turns on this distinction, only two
+ * measurements can agree or diverge, so it lives beside the union rather
+ * than as a private predicate that drifts per caller.
+ */
+export function isMeasuredStatus(s: CheckStatus): boolean {
+  return s === 'ok' || s === 'flaw';
+}
+
+/**
  * Hook quality, NOT technical severity. This ladder decides who gets contacted,
  * so it ranks by how good a finding is to open a conversation with:
  * invisible to the owner, provable by them in one keystroke, and consequential.
