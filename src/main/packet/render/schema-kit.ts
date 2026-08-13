@@ -38,8 +38,8 @@
  */
 
 import { allowedFactsFrom, Renderer } from '../generate';
-import { Candidate, FlawFinding } from '../../../shared/types';
-import { stemTerms } from '../../checks/ai-readiness';
+import { Candidate, FlawFinding, listingOf } from '../../../shared/types';
+import { stemsFor } from '../../checks/ai-readiness';
 
 // ---------------------------------------------------------------------------
 // Date. Same ordinal trick as scorecard.ts, duplicated rather than shared:
@@ -105,21 +105,51 @@ function findByCheck(findings: FlawFinding[], id: FlawFinding['checkId']): FlawF
 /**
  * Where this candidate's facts came from, in the words the kit prints.
  *
- * A typed candidate has no Google Business Profile. Sourcing the operator's
- * own typed name and address to one puts a fabricated attribution on a
- * free-tier document the prospect receives. Found by the pre-merge review.
+ * A typed candidate has no Google Business Profile of its own. Sourcing the
+ * operator's own typed name and address to one puts a fabricated attribution
+ * on a free-tier document the prospect receives. Found by the pre-merge
+ * review.
+ *
+ * Three fields rather than one, because after an attach the answer differs per
+ * fact. A typed candidate whose operator attached a listing takes its phone,
+ * address and category FROM that listing, while the name that prints on every
+ * artifact and the address that was scanned are still the operator's. One
+ * blanket "it all came from the listing" would be false about two of them,
+ * which is the same error in the other direction.
  */
-function provenance(candidate: Candidate): { source: string; theSource: string; hasListing: boolean } {
-  if (candidate.source !== 'google-places-new') {
+type Provenance = {
+  /** For facts read off the listing: phone, address, category. */
+  source: string;
+  theSource: string;
+  /** The name on the org node, which is always the candidate's printed name. */
+  nameSource: string;
+  /** The url on the org node, which is always what was actually scanned. */
+  websiteSource: string;
+  hasListing: boolean;
+};
+
+function provenance(candidate: Candidate): Provenance {
+  const operatorSaid = 'the details you gave us when you started this scan';
+  const isPlacesRow = candidate.source === 'google-places-new';
+  // The name and the scanned address belong to whoever supplied the row, which
+  // is Google only when the row itself came from Places.
+  const nameSource = isPlacesRow ? 'your Google Business Profile listing' : operatorSaid;
+  const websiteSource = isPlacesRow ? 'the website field on that listing' : 'the address you gave us';
+
+  if (!listingOf(candidate)) {
     return {
-      source: 'the details you gave us when you started this scan',
+      source: operatorSaid,
       theSource: 'what you gave us',
+      nameSource,
+      websiteSource,
       hasListing: false,
     };
   }
   return {
     source: 'your Google Business Profile listing',
     theSource: 'that listing',
+    nameSource,
+    websiteSource,
     hasListing: true,
   };
 }
@@ -141,9 +171,10 @@ function provenance(candidate: Candidate): { source: string; theSource: string; 
  * mismatch details; the release-pass test in test-packet.js pins the pairing,
  * so a rewording there that slips past these patterns fails the suite.
  */
-function disputedFacts(findings: FlawFinding[]): { phone: boolean; address: boolean } {
+function disputedFacts(findings: FlawFinding[]): { phone: boolean; address: boolean; name: boolean } {
   let phone = false;
   let address = false;
+  let name = false;
   for (const f of findings) {
     if (f.checkId !== 'nap-consistency') continue;
     const text = f.detail ?? '';
@@ -155,8 +186,21 @@ function disputedFacts(findings: FlawFinding[]): { phone: boolean; address: bool
     ) {
       address = true;
     }
+    /**
+     * A name difference never sets nap-consistency's severity, so it has no
+     * variant of its own and only ever appears as a sentence appended to the
+     * detail. It still has to be visible here.
+     *
+     * On a Places row this was unreachable: the name the kit publishes IS the
+     * listing name, so the two could not disagree. Attaching a listing to a
+     * typed row makes them two independent strings, and the packet could then
+     * report a proven name disagreement between the listing and the site while
+     * the kit in the same envelope handed over markup publishing a third name,
+     * with no note that anything was in question.
+     */
+    if (/Name: Google lists/.test(text)) name = true;
   }
-  return { phone, address };
+  return { phone, address, name };
 }
 
 // ---------------------------------------------------------------------------
@@ -179,7 +223,19 @@ function parseAddress(address: string): AddressParts {
     return { streetAddress: null, addressLocality: null, addressRegion: null, postalCode: null, addressCountry: null };
   }
   const last = parts[parts.length - 1] ?? '';
-  const country = parts.length >= 4 && !/\d/.test(last) ? last : null;
+  /**
+   * Three parts is a country too, not just four.
+   *
+   * The threshold used to be four, which is the shape a business with a street
+   * address has. A service-area business has none, and Google formats it
+   * "Rockport, ME 00000, USA": three parts, so "USA" was read as the region,
+   * "ME 00000" as the town, and the kit told a plumber to put `| ME 00000` in
+   * their title tag. Unreachable while only the Places door supplied addresses
+   * with street lines; reachable the moment a listing could be attached to a
+   * typed row. Four-part addresses are unaffected, and two-part ones (the
+   * operator's typed "Rockport, ME") stay below the threshold.
+   */
+  const country = parts.length >= 3 && !/\d/.test(last) ? last : null;
   const regionZipIdx = country ? parts.length - 2 : parts.length - 1;
   const regionZip = parts[regionZipIdx] ?? '';
   const zipMatch = /(\d{5})(?:-\d{4})?/.exec(regionZip);
@@ -288,6 +344,7 @@ type JsonNode = Record<string, unknown>;
 
 function buildGraph(
   candidate: Candidate,
+  listingPhone: string | null,
   origin: string | null,
   schemaType: string,
   addr: AddressParts,
@@ -300,9 +357,12 @@ function buildGraph(
   const org: JsonNode = { '@type': schemaType, '@id': orgId, name: candidate.name };
   if (origin) org.url = origin;
 
+  // The listing's number, never a candidate field: on a typed row that field
+  // is empty, and if it ever were not, it would be something the operator
+  // typed being pasted into markup the business publishes as fact.
   const phoneIncluded =
-    Boolean(candidate.phone) && allMeasured(candidate.phone ?? '', measured) && !disputed.phone;
-  if (phoneIncluded) org.telephone = candidate.phone;
+    Boolean(listingPhone) && allMeasured(listingPhone ?? '', measured) && !disputed.phone;
+  if (phoneIncluded) org.telephone = listingPhone;
 
   const addressDigits = [addr.streetAddress ?? '', addr.postalCode ?? ''].join(' ');
   const addressIncluded =
@@ -330,16 +390,42 @@ function buildGraph(
 
 export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, operator }) => {
   const measured = new Set(allowedFactsFrom(findings).numbers);
+  const listing = listingOf(candidate);
+  // The origin is what was SCANNED, which is the candidate's website whichever
+  // door it came in by. A listing's own website field can differ, and the kit
+  // is markup for the site this scan actually read.
   const origin = originOf(candidate.website);
-  const schemaType = schemaTypeFor(candidate.primaryType);
-  const addr = parseAddress(candidate.address);
+  // Everything else the kit states as a listing fact comes off the listing, or
+  // is absent. On a Places row these are the identical strings the candidate
+  // carries; on a typed row without an attach they are all empty, which is the
+  // behaviour every branch below was already written for.
+  const listingPhone = listing?.phone ?? null;
+  const primaryType = listing?.primaryType ?? null;
+  const schemaType = schemaTypeFor(primaryType);
+  const addr = parseAddress(listing?.address ?? candidate.address);
   const disputed = disputedFacts(findings);
-  const { graph, phoneIncluded, addressIncluded } = buildGraph(candidate, origin, schemaType, addr, measured, disputed);
+  const { graph, phoneIncluded, addressIncluded } = buildGraph(
+    candidate,
+    listingPhone,
+    origin,
+    schemaType,
+    addr,
+    measured,
+    disputed
+  );
   const prov = provenance(candidate);
 
-  const categoryWords = stemTerms(candidate.primaryType, candidate.name);
+  const categoryWords = stemsFor(candidate);
   const categoryLabel = categoryWords.length ? titleCase(categoryWords) : null;
-  const town = addr.addressLocality;
+  /**
+   * The town for the title, meta and llms.txt examples.
+   *
+   * Falls back to the operator's own typed town when the listing's address
+   * does not yield one. A listing address is free-form enough to parse to
+   * nothing, and dropping a town the operator supplied because an attached
+   * listing was formatted unusually makes the attach a downgrade.
+   */
+  const town = addr.addressLocality ?? parseAddress(candidate.address).addressLocality;
 
   const lines: string[] = [];
 
@@ -357,8 +443,13 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   }
 
   lines.push(
-    `This kit is copy-paste markup, built only from what is already on ${candidate.name}'s own pages and its ` +
-      `\. Every block below says where its facts came from. Anything not confirmed ` +
+    // The antecedent for "that listing" / "what you gave us" in every
+    // provenance line below. It was lost at some point and the sentence has
+    // been rendering as "...own pages and its ." in every kit generated since;
+    // found by the adversarial pass on the listing-attach change, which added
+    // a line depending on it.
+    `This kit is copy-paste markup, built only from what is already on ${candidate.name}'s own pages and from ` +
+      `${prov.source}. Every block below says where its facts came from. Anything not confirmed ` +
       `on ${candidate.name}'s own pages is flagged as needing your confirmation before you paste it, rather than ` +
       'stated as settled.'
   );
@@ -366,7 +457,11 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   lines.push(
     'One rule sits above the rest: do not add `aggregateRating` or `Review` markup about ' +
       `${candidate.name} to any of this` +
-      (prov.hasListing ? ', even though the listing hands over a rating and a review count' : '') +
+      // Only when the listing actually hands one over. Places omits absent
+      // fields, so "hasListing" is not the same question as "has a rating".
+      (listing && listing.rating !== null && listing.reviewCount !== null
+        ? ', even though the listing hands over a rating and a review count'
+        : '') +
       '. Self-authored review markup does not qualify for rich results, and ' +
       'it is the schema type most likely to draw a manual action. None of the blocks below include it, and none ' +
       'should. If a developer or a template ever suggests it, decline.'
@@ -385,24 +480,30 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   lines.push('');
   lines.push('Provenance:');
   lines.push('');
-  lines.push(`- \`name\`: ${prov.source}.`);
+  lines.push(
+    disputed.name
+      ? `- \`name\`: ${prov.nameSource}. This scan also found that the name on your Google listing and the name ` +
+          'in your own structured data are not the same. Settle which one is right before you publish this block, ' +
+          'and use that one here. The scorecard names both.'
+      : `- \`name\`: ${prov.nameSource}.`
+  );
   lines.push(
     // Say plainly when the type is a floor rather than a fact. The listing's
     // category is a taxonomy bucket, and publishing it as a claim about the
     // trade is how an HVAC company was handed GeneralContractor markup to
     // paste onto its live site.
-    typeIsGuess(candidate.primaryType)
+    typeIsGuess(primaryType)
       ? `- \`@type\` (\`${schemaType}\`): a safe floor, not a finding. ` +
-        (candidate.primaryType
-          ? `The category on ${prov.theSource} ("${candidate.primaryType}") is an umbrella that does not name a trade, so nothing narrower could be read from it. `
-          : `No category came with ${prov.theSource} at all, so nothing narrower could be read from it. `) +
-        'Pick the closest type from the list at schema.org/LocalBusiness and swap it in. Being specific here is worth more than anything else in this block.'
-      : `- \`@type\` (\`${schemaType}\`): mapped from the category on ${prov.theSource} ("${candidate.primaryType}").`
+        (primaryType
+          ? `The category on ${prov.theSource} ("${primaryType}") is an umbrella that does not name a trade, so nothing narrower could be read from it. `
+          : prov.hasListing
+            ? `No category came with ${prov.theSource} at all, so nothing narrower could be read from it. `
+            : 'This scan started from a web address rather than a listing, so no category came with it at all. ')
+        + 'Pick the closest type from the list at schema.org/LocalBusiness and swap it in. Being specific here is worth more than anything else in this block.'
+      : `- \`@type\` (\`${schemaType}\`): mapped from the category on ${prov.theSource} ("${primaryType}").`
   );
   if (origin) {
-    lines.push(
-      `- \`url\`: ${prov.hasListing ? 'the website field on that listing' : 'the address you gave us'}.`
-    );
+    lines.push(`- \`url\`: ${prov.websiteSource}.`);
   }
   lines.push(
     phoneIncluded
@@ -411,17 +512,23 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
         ? '- `telephone`: left out. This scan found the number on your listing and the number on ' +
             'your own site disagree, and pasting either would take a side. The scorecard names both. Settle ' +
             'which is right, fix the wrong one, then add the survivor here.'
-        : prov.hasListing
+        : listingPhone
           ? '- `telephone`: left out. Your Google Business Profile lists a number for you, but this scan\'s ' +
               'confirmed findings do not independently state it, so it is not pasted in unverified. Add it yourself ' +
               'once you have checked it against your own page.'
-          : '- `telephone`: left out. This scan started from a web address rather than a listing, so it has no ' +
-              'phone number for you. Add your own once you have checked it against your own page.'
+          : prov.hasListing
+            ? '- `telephone`: left out. No phone number came with the listing this scan read, so it has none for ' +
+                'you. Add your own once you have checked it against your own page.'
+            : '- `telephone`: left out. This scan started from a web address rather than a listing, so it has no ' +
+                'phone number for you. Add your own once you have checked it against your own page.'
   );
   lines.push(
     addressIncluded
       ? `- \`address\`: ${prov.source}.`
-      : disputed.address
+      : !prov.hasListing
+        ? '- `address`: left out. This scan started from a web address rather than a listing, so it has no ' +
+            'postal address for you. Add your own once you have checked it against your own page.'
+        : disputed.address
         ? '- `address`: left out. This scan found the address on your listing and the address on ' +
             'your own site disagree, and pasting either would take a side. The scorecard names both. Settle ' +
             'which is right, fix the wrong one, then add the survivor here.'
@@ -492,10 +599,28 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
         'town, in that order, and nothing else:'
     );
   } else {
+    // Why there is no category has to be true of THIS scan. The single
+    // sentence here used to blame an umbrella listing category in every case,
+    // including a scan that started from a typed address and never read a
+    // listing at all, which puts a claim about a Google profile nobody
+    // consulted into a document the business receives.
     lines.push(
       'A title that works for a search engine and an AI assistant alike names the business, the category and the ' +
-        'town, in that order, and nothing else. This scan could not read a category for you: the listing files you ' +
-        'under an umbrella that does not name a trade. The example below therefore has a gap where the category ' +
+        'town, in that order, and nothing else. This scan could not read a category for you: ' +
+        // Three reasons, not two. categoryLabel is also null when the listing
+        // carries no category at all, and when the only category word is a
+        // word in the business's own name ("Rockport Bakery" filed under
+        // bakery), which is dropped on purpose so a name cannot be counted as
+        // a category. Blaming an umbrella listing in either case is a claim
+        // about the listing that the listing does not support.
+        (!prov.hasListing
+          ? 'it started from a web address rather than a listing, and a web address carries no category. '
+          : !primaryType
+            ? 'no category came with the listing it read. '
+            : typeIsGuess(primaryType)
+              ? 'the listing files you under an umbrella that does not name a trade. '
+              : `the only word in the listing's category ("${primaryType}") is already a word in your own name, so it says nothing a customer would search that your name does not. `) +
+        'The example below therefore has a gap where the category ' +
         'goes, and filling it in with the word a customer would use is the single most valuable edit in this ' +
         'section:'
     );

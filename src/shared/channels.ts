@@ -30,6 +30,26 @@ export const CH = {
   discoverFromUrl: 'discover:fromUrl',
 
   /**
+   * LookupListingRequest -> SearchListingsResponse. Finds the Google listing
+   * for a business the operator has already chosen, by name or by Place ID,
+   * so a typed candidate can be given the second source that NAP consistency
+   * and the vocabulary points need. Needs a key, and bills one request.
+   */
+  discoverLookupListing: 'discover:lookupListing',
+
+  /**
+   * AttachListingRequest -> Candidate. Attaches a listing this process minted
+   * during a lookup: the renderer sends a place id, not a listing, so the
+   * ordinary path cannot attach what Google never returned, and the operator's
+   * pick costs no second billed request. See the scope note in
+   * discovery/attach.ts for what this does and does not guarantee.
+   */
+  discoverAttachListing: 'discover:attachListing',
+
+  /** Candidate -> Candidate. Drops an attached listing again. */
+  discoverDetachListing: 'discover:detachListing',
+
+  /**
    * RunCheckRequest -> FlawFinding. Runs the flaw checks for one candidate.
    * Findings come back 'remote' and cannot be turned into artifacts until the
    * operator confirms them with their own view-source (Phase 4).

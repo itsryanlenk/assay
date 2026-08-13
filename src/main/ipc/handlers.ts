@@ -58,8 +58,9 @@ const PACKET_RENDERERS: Renderer[] = [
  */
 const fontsDir = (): string => path.resolve(__dirname, '..', '..', '..', '..', 'assets', 'fonts');
 import * as config from '../config/store';
-import { searchPlaces } from '../discovery/places';
+import { fetchListingByPlaceId, searchListingsByName, searchPlaces } from '../discovery/places';
 import { candidateFromUrl } from '../discovery/from-url';
+import { attachListing, detachListing, mintedListing, rememberListings } from '../discovery/attach';
 import { providerFor } from '../agent/resolve';
 import { withBrandVoice } from '../agent/brand-voice';
 import { runChecks } from '../checks/registry';
@@ -267,6 +268,90 @@ export function registerHandlers(): void {
         name: typeof p.name === 'string' ? p.name : '',
         town: typeof p.town === 'string' ? p.town : '',
       });
+    })
+  );
+
+  /**
+   * Looking up the Google listing for a business the operator has already
+   * chosen. Optional by design: the typed door works with no key at all, and
+   * this is the door for an operator who does have one and does have a listing
+   * to hand over. Bills one request either way, which the response says.
+   */
+  ipcMain.handle(
+    CH.discoverLookupListing,
+    safe(CH.discoverLookupListing, async (payload) => {
+      const p = (payload ?? {}) as Record<string, unknown>;
+      const name = typeof p.name === 'string' ? p.name.trim() : '';
+      const placeId = typeof p.placeId === 'string' ? p.placeId.trim() : '';
+
+      if (name === '' && placeId === '') {
+        return err('bad_request', 'Enter a business name to search for, or a Place ID.');
+      }
+      // Both filled is an ambiguous request, not a helpful one: answering it
+      // means picking which the operator meant, and picking wrong attaches a
+      // different business than the one they were looking at.
+      if (name !== '' && placeId !== '') {
+        return err('bad_request', 'Give a business name or a Place ID, not both.');
+      }
+
+      const apiKey = config.getKey('googlePlaces');
+      if (!apiKey) {
+        return err('config', 'Attaching a Google listing needs a Places API key. Add one in Settings, or scan without one.', {
+          detail:
+            'Needs a key with "Places API (New)" enabled and billing active on the Google Cloud project. The URL scan itself needs no key.',
+        });
+      }
+
+      const result =
+        placeId !== ''
+          ? await fetchListingByPlaceId(placeId, apiKey)
+          : await searchListingsByName(name, apiKey);
+
+      // Main keeps what it minted, so the operator's pick can be attached from
+      // this copy rather than from whatever the renderer hands back.
+      if (result.ok) rememberListings(result.data.listings);
+      return result;
+    })
+  );
+
+  /**
+   * Attaching one of those listings. The renderer sends back only a place id;
+   * the listing itself comes from the register main filled during the lookup,
+   * which is what keeps "a listing is only ever minted from a Places response"
+   * true no matter what the renderer sends.
+   */
+  ipcMain.handle(
+    CH.discoverAttachListing,
+    safe(CH.discoverAttachListing, (payload) => {
+      const p = (payload ?? {}) as Record<string, unknown>;
+      const candidate = p.candidate as Candidate | undefined;
+      const placeId = typeof p.placeId === 'string' ? p.placeId.trim() : '';
+
+      if (!candidate || typeof candidate !== 'object' || typeof candidate.name !== 'string') {
+        return err('bad_request', 'A candidate is required.');
+      }
+      if (placeId === '') return err('bad_request', 'A listing is required.');
+
+      const listing = mintedListing(placeId);
+      if (!listing) {
+        return err(
+          'not_found',
+          'That listing is no longer in hand. Look it up again and attach it from the fresh result.'
+        );
+      }
+      return attachListing(candidate, listing);
+    })
+  );
+
+  ipcMain.handle(
+    CH.discoverDetachListing,
+    safe(CH.discoverDetachListing, (payload) => {
+      const p = (payload ?? {}) as Record<string, unknown>;
+      const candidate = p.candidate as Candidate | undefined;
+      if (!candidate || typeof candidate !== 'object' || typeof candidate.name !== 'string') {
+        return err('bad_request', 'A candidate is required.');
+      }
+      return ok(detachListing(candidate));
     })
   );
 

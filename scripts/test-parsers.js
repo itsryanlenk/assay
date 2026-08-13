@@ -1795,6 +1795,205 @@ async function bookingContactHopEndToEnd() {
     verdicts.some((v) => String(v.variant || '').includes('mismatch')), false);
 }
 
+// --- an attached listing: the typed door with a GBP bolted on ---------------
+/**
+ * The typed door is keyless on purpose, and its price is that the two
+ * measurements needing a second source mark themselves out: NAP has nothing to
+ * compare the site against, and plain-words cannot test vocabulary without a
+ * category. An operator scanning their OWN site, or a prospect they reached by
+ * URL and can identify on Google, has that second source and could not hand it
+ * over.
+ *
+ * The rule these tests exist to hold is that attaching a listing adds a
+ * SOURCE, and changes nothing else. The candidate's name, town, website and
+ * placeId are what the ledger, the folder name and the artifacts are built
+ * from; moving any of them re-slugs the prospect and drops every earlier
+ * approval row out of the supersede sweep, which is a bug this project has
+ * already shipped once.
+ */
+{
+  const T = require(path.join(ROOT, 'dist/main/shared/types.js'));
+  const AT = require(path.join(ROOT, 'dist/main/main/discovery/attach.js'));
+  const FU = require(path.join(ROOT, 'dist/main/main/discovery/from-url.js'));
+  const P = require(path.join(ROOT, 'dist/main/main/packet/paths.js'));
+  const NAP = require(path.join(ROOT, 'dist/main/main/checks/nap-consistency.js'));
+  const AI = require(path.join(ROOT, 'dist/main/main/checks/ai-readiness.js'));
+
+  const placesCandidate = {
+    placeId: 'ChIJ_test_place',
+    name: 'Harbor Lane Plumbing',
+    address: '100 Example Rd, Springfield, ST 00000, USA',
+    location: { lat: 1, lng: 2 },
+    website: 'https://harbor-lane.test/',
+    phone: '(555) 000-1111',
+    rating: 4.5,
+    reviewCount: 20,
+    businessStatus: 'OPERATIONAL',
+    primaryType: 'plumber',
+    mapsUri: 'https://maps.google.com/?cid=1',
+    discoveredAt: '2026-08-12T00:00:00.000Z',
+    source: 'google-places-new',
+  };
+
+  // --- listingOf: one answer to "is there a listing", whichever door it came by
+  const own = T.listingOf(placesCandidate);
+  eq('a Places candidate IS a listing', own !== null, true);
+  eq('and the listing it yields carries its own facts',
+    own && [own.name, own.phone, own.primaryType],
+    ['Harbor Lane Plumbing', '(555) 000-1111', 'plumber']);
+  eq('and the listing keeps Google\'s place id', own && own.placeId, 'ChIJ_test_place');
+
+  const typed = FU.candidateFromUrl({
+    url: 'https://harbor-lane.test/',
+    name: 'Harbor Lane Plumbing',
+    town: 'Springfield, ST',
+  }).data;
+  eq('a typed candidate has no listing', T.listingOf(typed), null);
+
+  const listing = AT.listingFromCandidate(placesCandidate);
+  eq('a listing minted from a Places result says where it came from',
+    listing.source, 'google-places-new');
+  eq('and carries the category the vocabulary test needs', listing.primaryType, 'plumber');
+
+  const attached = AT.attachListing(typed, listing);
+  eq('attaching to a typed candidate is allowed', attached.ok, true);
+  eq('and the listing is then readable through the one accessor',
+    attached.ok && T.listingOf(attached.data) !== null, true);
+  eq('and it is the listing that was attached',
+    attached.ok && T.listingOf(attached.data).phone, '(555) 000-1111');
+
+  // The whole point of a separate object: provenance survives the attach.
+  eq('the candidate still says the operator typed it',
+    attached.ok && attached.data.source, 'operator-url');
+  eq('the ledger key does not move', attached.ok && attached.data.placeId, typed.placeId);
+  eq('the name that prints on artifacts does not move',
+    attached.ok && attached.data.name, 'Harbor Lane Plumbing');
+  eq('the scan target stays the address the operator typed',
+    attached.ok && attached.data.website, 'https://harbor-lane.test/');
+  eq('and the packet folder is unchanged, so no earlier approval falls out of the sweep',
+    attached.ok && P.businessSlug(attached.data), P.businessSlug(typed));
+  // Listing facts must never be written onto the candidate's own fields, which
+  // are the ones every artifact sources to the operator.
+  eq('the listing phone is not copied onto the candidate',
+    attached.ok && attached.data.phone, null);
+  eq('the listing address is not copied onto the candidate',
+    attached.ok && attached.data.address, 'Springfield, ST');
+
+  // A Places candidate already IS a listing; attaching a second one is a bug,
+  // not a feature, and main refuses rather than picking a winner.
+  eq('a Places candidate cannot have a listing attached',
+    AT.attachListing(placesCandidate, listing).ok, false);
+
+  // Provenance is the gate, so a listing that does not say it came from Places
+  // is not a listing, however well-shaped it is.
+  eq('a hand-made listing object is not read as a listing',
+    T.listingOf({ ...typed, listing: { ...listing, source: 'operator-url' } }), null);
+  eq('and neither is a null one', T.listingOf({ ...typed, listing: null }), null);
+  // No precedence question to get wrong: a Places candidate reads as itself.
+  eq('a Places candidate reads its own fields, not a stray attachment',
+    T.listingOf({ ...placesCandidate, listing: { ...listing, phone: '(555) 999-9999' } }).phone,
+    '(555) 000-1111');
+
+  // --- NAP now has a second source ------------------------------------------
+  const siteHtml =
+    '<script type="application/ld+json">' +
+    JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'LocalBusiness',
+      name: 'Harbor Lane Plumbing',
+      telephone: '(555) 010-9999',
+      address: { '@type': 'PostalAddress', streetAddress: '100 Example Rd', postalCode: '00000' },
+    }) +
+    '</script><p>Harbor Lane Plumbing, 100 Example Rd. Call (555) 010-9999.</p>';
+
+  const bare = NAP.__test.aspectsFor(siteHtml, typed);
+  eq('with no listing the phone still cannot be compared', bare.phone.state, 'no-reference');
+
+  const withListing = NAP.__test.aspectsFor(siteHtml, attached.data);
+  eq('an attached listing gives the phone something to compare against',
+    withListing.phone.state, 'mismatch');
+  eq('and the street number agrees', withListing.street.state, 'match');
+  eq('and the postal code agrees', withListing.postal.state, 'match');
+
+  // --- plain-words can test vocabulary now ----------------------------------
+  eq('a typed candidate alone yields no category words', AI.stemsFor(typed), []);
+  eq('an attached listing supplies them', AI.stemsFor(attached.data), ['plumber']);
+  eq('a Places candidate is unaffected', AI.stemsFor(placesCandidate), ['plumber']);
+  /**
+   * The business's own name is not a category word, whichever side it is on.
+   * The candidate name deliberately does NOT contain the stem: with the word
+   * on both names the single-name call already excluded it, so the assertion
+   * passed with or without the fix and proved nothing. Caught by the
+   * adversarial pass.
+   */
+  eq('a name word on the listing alone cannot count as a category word',
+    AI.stemsFor(AT.attachListing(
+      FU.candidateFromUrl({ url: 'https://x.test/', name: 'Bob Fixings' }).data,
+      { ...listing, name: 'Plumber Bob' }
+    ).data),
+    []);
+  eq('and the candidate name alone would not have excluded it',
+    AI.stemTerms('plumber', 'Bob Fixings'), ['plumber']);
+
+  // Detach, exercised on a candidate that actually carries a listing. Detaching
+  // one that never had a listing is satisfied by a function that does nothing.
+  const dropped = AT.detachListing(attached.data);
+  eq('detaching removes the listing', T.listingOf(dropped), null);
+  eq('and leaves everything else where it was',
+    [dropped.placeId, dropped.name, dropped.address, dropped.website, dropped.source],
+    [typed.placeId, typed.name, typed.address, typed.website, 'operator-url']);
+  eq('and the checks go back to having nothing to compare',
+    NAP.__test.aspectsFor(siteHtml, dropped).phone.state, 'no-reference');
+
+  // A candidate whose source is missing or unrecognised is not a typed
+  // candidate, and listingOf would read a listing hung on it.
+  eq('a listing cannot be attached to a candidate with no source',
+    AT.attachListing({ ...typed, source: undefined }, listing).ok, false);
+}
+
+// --- the Places listing lookups, minus the network --------------------------
+/**
+ * Everything these two functions decide BEFORE they reach Google, plus the
+ * register that lets a pick be attached without paying for a second request.
+ * No call here reaches the network: each input is one the function refuses.
+ */
+{
+  const PL = require(path.join(ROOT, 'dist/main/main/discovery/places.js'));
+  const AT = require(path.join(ROOT, 'dist/main/main/discovery/attach.js'));
+
+  /**
+   * The Place Details mask takes per-place field names. The searchText mask
+   * prefixes them with `places.`, and using that one here comes back as a 400
+   * about an unknown field, which is a silent failure dressed as a bad
+   * request. Pinned so the two masks cannot be interchanged.
+   */
+  eq('the details mask carries no places. prefix',
+    /(^|,)places\./.test(PL.PLACE_DETAILS_FIELD_MASK), false);
+  eq('the search mask still does', /(^|,)places\./.test(PL.PLACES_FIELD_MASK), true);
+  // Both doors must hand the checks the same facts, or one business would be
+  // described differently depending on which box the operator typed in.
+  eq('both masks ask for the same per-place fields',
+    PL.PLACE_DETAILS_FIELD_MASK.split(',').sort(),
+    PL.PLACES_FIELD_MASK.split(',').filter((f) => f !== 'nextPageToken')
+      .map((f) => f.replace(/^places\./, '')).sort());
+
+  // The register. Bounded, so a long session of searching cannot grow it
+  // without limit, and least-recently-offered is what falls out.
+  AT.__resetRegister();
+  const fake = (n) => ({
+    placeId: `p${n}`, name: `N${n}`, address: '', location: null, website: null, phone: null,
+    rating: null, reviewCount: null, businessStatus: null, primaryType: null, mapsUri: null,
+    attachedAt: '2026-08-12T00:00:00.000Z', source: 'google-places-new',
+  });
+  eq('nothing is remembered before a lookup', AT.mintedListing('p1'), null);
+  AT.rememberListings([fake(1), fake(2)]);
+  eq('a minted listing can be attached from memory', AT.mintedListing('p1').name, 'N1');
+  AT.rememberListings(Array.from({ length: 205 }, (_, i) => fake(100 + i)));
+  eq('the register is bounded', AT.mintedListing('p100'), null);
+  eq('and keeps the most recent', AT.mintedListing('p304').name, 'N304');
+  AT.__resetRegister();
+}
+
 // --- nap: run() end to end, through the same aspect path the tests use ------
 /**
  * run() must go through aspectsFor, not a private copy of it. This drives a
@@ -1886,6 +2085,136 @@ async function urlCandidateRunEndToEnd() {
     ['no-reference', 'no-reference', 'no-reference', 'no-reference']);
 }
 
+/**
+ * The attached listing, driven through the shipped paths rather than through
+ * the helpers the unit tests call. Each of these three reads the listing at a
+ * different point in a different file, and each of them used to read
+ * `ctx.candidate.<field>` directly, which is null on a typed candidate no
+ * matter what the operator attached.
+ */
+async function attachedListingRunEndToEnd() {
+  const NAP = require(path.join(ROOT, 'dist/main/main/checks/nap-consistency.js'));
+  const AI = require(path.join(ROOT, 'dist/main/main/checks/ai-readiness.js'));
+  const BP = require(path.join(ROOT, 'dist/main/main/checks/booking-path.js'));
+  const AT = require(path.join(ROOT, 'dist/main/main/discovery/attach.js'));
+  const FU = require(path.join(ROOT, 'dist/main/main/discovery/from-url.js'));
+
+  const listing = AT.listingFromCandidate({
+    placeId: 'ChIJ_test_place',
+    name: 'Harbor Lane Plumbing',
+    address: '100 Example Rd, Springfield, ST 00000, USA',
+    location: null,
+    website: 'https://harbor-lane.test/',
+    phone: '(555) 000-1111',
+    rating: null,
+    reviewCount: null,
+    businessStatus: 'OPERATIONAL',
+    primaryType: 'plumber',
+    mapsUri: null,
+    discoveredAt: '2026-08-12T00:00:00.000Z',
+    source: 'google-places-new',
+  });
+  const typed = FU.candidateFromUrl({
+    url: 'https://harbor-lane.test/',
+    name: 'Harbor Lane Plumbing',
+    town: 'Springfield, ST',
+  }).data;
+  const withListing = AT.attachListing(typed, listing).data;
+
+  const stub = (body) => ({
+    candidate: withListing,
+    scanId: 'attach-scan',
+    evidenceRoot: '(unused)',
+    agent: { run: async () => ({ ok: false, text: '' }) },
+    fetch: async (url) => ({ body, ref: { httpStatus: 200, truncated: false, url, requestedUrl: url } }),
+  });
+
+  // --- nap: the listing is now a real second source -------------------------
+  const napHtml =
+    '<script type="application/ld+json">' +
+    JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': 'LocalBusiness',
+      name: 'Harbor Lane Plumbing',
+      telephone: '(555) 010-9999',
+      address: { '@type': 'PostalAddress', streetAddress: '100 Example Rd', postalCode: '00000' },
+    }) +
+    '</script><p>Harbor Lane Plumbing, 100 Example Rd. Call (555) 010-9999.</p>';
+  const napFinding = await NAP.napConsistencyCheck.run(stub(napHtml));
+  eq('run(): an attached listing produces the phone mismatch it proves',
+    [napFinding.severity, napFinding.variant], [4, 'phone-mismatch']);
+  eq('run(): and the finding may now cite the listing',
+    /Google lists/.test(napFinding.detail), true);
+  // The same page against the same candidate WITHOUT the listing must stay
+  // silent, or the attach is not what produced the claim.
+  const napBare = await NAP.napConsistencyCheck.run({ ...stub(napHtml), candidate: typed });
+  eq('run(): and without one the same page proves nothing', napBare.severity, 0);
+
+  // --- ai-readiness: the vocabulary points are scored, not marked out -------
+  // One same-origin link and nothing else readable, which is the shape that
+  // earns the site-wide items without a second page.
+  const homeHtml =
+    '<title>Harbor Lane Plumbing, a plumber in Springfield</title>' +
+    '<meta name="description" content="' + 'Emergency plumber and drain service in Springfield. '.repeat(2) + '">' +
+    '<meta property="og:title" content="Harbor Lane Plumbing">' +
+    '<meta property="og:description" content="Plumber in Springfield.">' +
+    '<a href="https://harbor-lane.test/about">About</a>';
+  const aiCtx = {
+    ...stub(homeHtml),
+    fetch: async (url) =>
+      url === 'https://harbor-lane.test/'
+        ? { body: homeHtml, ref: { httpStatus: 200, truncated: false, url, requestedUrl: url } }
+        : { body: '', ref: { httpStatus: 404, truncated: false, url, requestedUrl: url } },
+  };
+  const aiFinding = await AI.aiReadinessCheck.run(aiCtx);
+  eq('run(): an attached listing puts the vocabulary points back on the table',
+    /Plain-words test 15\/15/.test(aiFinding.detail), true);
+  const aiBare = await AI.aiReadinessCheck.run({ ...aiCtx, candidate: typed });
+  eq('run(): and without one they are still marked out',
+    /Plain-words test 10\/10/.test(aiBare.detail), true);
+
+  // --- booking-path: "the number Google lists" means a listing was read -----
+  const bookingHtml =
+    '<p>Harbor Lane Plumbing. <a href="/quote">Request a quote</a></p>' +
+    '<form><input type="email" name="email"></form>';
+  const bookingFinding = await BP.bookingPathCheck.run(stub(bookingHtml));
+  eq('run(): a listing phone absent from the source is disclosed as the listing\'s',
+    /\(555\) 000-1111/.test(bookingFinding.detail), true);
+  const bookingBare = await BP.bookingPathCheck.run({ ...stub(bookingHtml), candidate: typed });
+  eq('run(): and with no listing no number is attributed to Google',
+    /Google/.test(bookingBare.detail), false);
+}
+
+/**
+ * The refusals both listing lookups make BEFORE they reach Google.
+ *
+ * Every input here is one the function rejects, so nothing in this test opens
+ * a socket. The place-id cases are the load-bearing ones: that value is
+ * spliced into the path of a request carrying the operator's API key, so
+ * anything able to climb out of the path segment has to be refused rather than
+ * encoded and hoped about.
+ */
+async function listingLookupRefusals() {
+  const PL = require(path.join(ROOT, 'dist/main/main/discovery/places.js'));
+
+  const idErr = async (id, key = 'test-key-never-sent') =>
+    (await PL.fetchListingByPlaceId(id, key)).error?.kind ?? 'OK';
+  const nameErr = async (name, key = 'test-key-never-sent') =>
+    (await PL.searchListingsByName(name, key)).error?.kind ?? 'OK';
+
+  eq('a path traversal is refused before any request', await idErr('../../foo'), 'bad_request');
+  eq('an absolute URL is refused', await idErr('https://evil.test/x'), 'bad_request');
+  eq('a percent sign is refused', await idErr('a%2Fb'), 'bad_request');
+  eq('an id carrying a query is refused', await idErr('ChIJx?a=b'), 'bad_request');
+  eq('an id carrying a colon is refused', await idErr('ChIJ:8080'), 'bad_request');
+  eq('an empty id is refused', await idErr(''), 'bad_request');
+  eq('an empty name is refused', await nameErr('   '), 'bad_request');
+
+  // No key is a config problem with a place to go, not a failed request.
+  eq('no key on the id door is a config error', await idErr('ChIJexample', ''), 'config');
+  eq('no key on the name door is a config error', await nameErr('anything', '  '), 'config');
+}
+
 // --- report -----------------------------------------------------------------
 // The exit code is set pessimistic BEFORE the async tail. If the awaited work
 // ever hangs, Node drains the event loop and exits without running the report,
@@ -1898,6 +2227,8 @@ Promise.resolve()
   .then(bookingPathRunEndToEnd)
   .then(bookingContactHopEndToEnd)
   .then(websiteParkedEndToEnd)
+  .then(attachedListingRunEndToEnd)
+  .then(listingLookupRefusals)
   .catch((err) => failures.push(`an end-to-end run threw\n      ${err && err.stack ? err.stack : err}`))
   .then(() => {
     console.log('\n--- PARSER TESTS ---');

@@ -14,7 +14,7 @@
  * split is interpolated rather than observed, it says so.
  */
 
-import { FlawFinding, FlawFix, Score, Severity } from '../../shared/types';
+import { Candidate, FlawFinding, FlawFix, Score, Severity, listingOf } from '../../shared/types';
 import {
   InsufficientCaptureError,
   ItemResult,
@@ -216,6 +216,26 @@ const GENERIC_PLACES_TYPES = new Set([
  * clothing, store. Returns [] for an umbrella bucket, which the caller reads
  * as "no category words to check" rather than as a failure.
  */
+/**
+ * The category words for a candidate, from whichever door its listing came in
+ * by: discovered through Places, or typed and then attached to one.
+ *
+ * run() used to read `ctx.candidate.primaryType` at the call site, which is
+ * null on every typed candidate no matter what the operator attached, so the
+ * vocabulary points stayed marked out. This is the seam run() and the tests
+ * share, for the reason nap-consistency's aspectsFor states: a test that
+ * rebuilds the wiring cannot catch the wiring being wrong.
+ *
+ * Both names are excluded, not just the candidate's. The rule is that a
+ * business's own name is not a category word, and after an attach there are
+ * two names it might be written under. For a Places candidate they are the
+ * same string and this is exactly what it was before.
+ */
+export function stemsFor(candidate: Candidate): string[] {
+  const listing = listingOf(candidate);
+  return stemTerms(listing?.primaryType ?? null, `${candidate.name} ${listing?.name ?? ''}`);
+}
+
 export function stemTerms(primaryType: string | null, name: string): string[] {
   const type = (primaryType ?? '').toLowerCase().trim();
   if (GENERIC_PLACES_TYPES.has(type)) return [];
@@ -632,7 +652,20 @@ export function scoreProductReview(nodes: Node[], sellsNothing: boolean): ItemRe
  * Splits: title 4, meta description 4, og/twitter pair 2, category stem in the
  * title 3, category stem in description or body 2.
  */
-export function scorePlainWords(html: string, visible: string, stems: string[]): ItemResult {
+export function scorePlainWords(
+  html: string,
+  visible: string,
+  stems: string[],
+  /**
+   * Whether a listing was read at all. Only changes the sentence, never the
+   * points: "no category term available from the listing" is an absence
+   * sourced to a listing, and printing it for a scan that started from a typed
+   * web address puts a claim about a Google profile nobody consulted into the
+   * client folder's score table. Defaults true so the existing call shape and
+   * every Places scan read exactly as before.
+   */
+  hadListing = true
+): ItemResult {
   const title = attrText(html, /<title\b[^>]*>([\s\S]*?)<\/title>/i);
   const desc = metaContent(html, 'description');
   const ogTitle = metaContent(html, 'og:title');
@@ -662,7 +695,9 @@ export function scorePlainWords(html: string, visible: string, stems: string[]):
   if (stems.length === 0) {
     naPoints = 5;
     notes.push(
-      'no category term available from the listing, so the 5 vocabulary points were marked out rather than scored'
+      hadListing
+        ? 'no category term available from the listing, so the 5 vocabulary points were marked out rather than scored'
+        : 'this scan started from a web address rather than a listing, so there was no category to test the page\'s vocabulary against and the 5 vocabulary points were marked out rather than scored'
     );
   } else {
     if (stemInTitle) earned += 3;
@@ -1078,7 +1113,12 @@ export const aiReadinessCheck: FlawCheck = {
       scopeSiteWide(scoreFaqPage(nodes, visible, faqOnPrimaryPage)),
       scopeSiteWide(scoreProductReview(nodes, false)),
       // Homepage only, deliberately: this item is about the front door.
-      scorePlainWords(home.body, visibleTextOf(home.body), stemTerms(ctx.candidate.primaryType, ctx.candidate.name)),
+      scorePlainWords(
+        home.body,
+        visibleTextOf(home.body),
+        stemsFor(ctx.candidate),
+        listingOf(ctx.candidate) !== null
+      ),
     ].map((r) =>
       /**
        * The confirmation pass never refuses the number.

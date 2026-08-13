@@ -33,6 +33,9 @@ const CH = {
   configSetAgentMode: 'config:setAgentMode',
   discoverSearch: 'discover:search',
   discoverFromUrl: 'discover:fromUrl',
+  discoverLookupListing: 'discover:lookupListing',
+  discoverAttachListing: 'discover:attachListing',
+  discoverDetachListing: 'discover:detachListing',
   checksRun: 'checks:run',
   agentProbe: 'agent:probe',
   confirmRun: 'confirm:run',
@@ -91,6 +94,9 @@ const api = {
   discover: {
     search: (req: Record<string, unknown>) => ipcRenderer.invoke(CH.discoverSearch, req),
     fromUrl: (req: Record<string, unknown>) => ipcRenderer.invoke(CH.discoverFromUrl, req),
+    lookupListing: (req: Record<string, unknown>) => ipcRenderer.invoke(CH.discoverLookupListing, req),
+    attachListing: (req: Record<string, unknown>) => ipcRenderer.invoke(CH.discoverAttachListing, req),
+    detachListing: (req: Record<string, unknown>) => ipcRenderer.invoke(CH.discoverDetachListing, req),
   },
   checks: {
     run: (req: Record<string, unknown>) => ipcRenderer.invoke(CH.checksRun, req),

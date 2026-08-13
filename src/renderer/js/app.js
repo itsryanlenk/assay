@@ -90,6 +90,29 @@ function checkLabel(checkId) {
   return CHECK_LABELS[checkId] || String(checkId).replace(/-/g, ' ');
 }
 
+/**
+ * Mirrors listingOf in shared/types.ts, same hand-kept arrangement as
+ * SEVERITY_WORDS and CHECK_LABELS above. The table needs the answer to decide
+ * what to print in the phone, reviews and status cells, and a row that shows
+ * NONE beside a listing the operator just attached reads as a failed attach.
+ *
+ * This copy decides display only. Every claim that reaches a document is
+ * decided by the main-process original, which is also the only thing that
+ * mints a listing.
+ *
+ * Not a byte-for-byte mirror: for a Places row the original returns a
+ * projection stamping `attachedAt`, while this returns the candidate itself.
+ * The fields the table reads (name, address, phone, rating, reviewCount,
+ * businessStatus) are the same either way, and nothing here reads
+ * `attachedAt`. Anything that starts to must take the projection instead.
+ */
+function listingOf(candidate) {
+  if (!candidate) return null;
+  if (candidate.source === 'google-places-new') return candidate;
+  const attached = candidate.listing;
+  return attached && attached.source === 'google-places-new' ? attached : null;
+}
+
 /** scan-<ISO date>-<random>, generated once per scan and stored on state. */
 function newScanId() {
   const rand = Math.random().toString(36).slice(2, 10);
@@ -224,9 +247,36 @@ function renderCandidateRow(c, index) {
 
   tr.appendChild(el('td', { className: 'cell-idx', text: String(index + 1) }));
 
+  const listing = listingOf(c);
+  const attached = c.source !== 'google-places-new' && listing !== null;
+
   const nameCell = el('td');
   nameCell.appendChild(el('div', { className: 'cell-name', text: c.name }));
   if (c.address) nameCell.appendChild(el('div', { className: 'cell-addr', text: c.address }));
+  /**
+   * Which business was attached, spelled out, and a way to undo it.
+   *
+   * A name search returns businesses that resemble each other, and attaching
+   * the wrong one turns every NAP sentence into a false accusation about a
+   * company that has nothing to do with this scan. The row therefore states
+   * the attached listing's own name and address rather than a tick.
+   */
+  if (attached) {
+    const line = el('div', { className: 'cell-addr' });
+    line.appendChild(el('b', { text: 'GBP: ' }));
+    line.appendChild(document.createTextNode(
+      listing.address ? `${listing.name} , ${listing.address}` : listing.name
+    ));
+    const drop = el('button', {
+      className: 'linkish',
+      text: 'detach',
+      attrs: { type: 'button', 'data-tip': 'Remove this listing from the row. The checks go back to having nothing to compare against.' },
+    });
+    drop.addEventListener('click', () => void detachCandidateListing(c));
+    line.appendChild(document.createTextNode(' '));
+    line.appendChild(drop);
+    nameCell.appendChild(line);
+  }
   tr.appendChild(nameCell);
 
   const siteCell = el('td');
@@ -244,9 +294,13 @@ function renderCandidateRow(c, index) {
   }
   tr.appendChild(siteCell);
 
+  // These three cells are listing facts, so they read the listing, not the
+  // candidate: on a typed row the candidate's own fields are empty by design
+  // and printing NONE beside a listing the operator just attached reads as an
+  // attach that failed.
   const phoneCell = el('td');
-  if (c.phone) {
-    phoneCell.appendChild(el('span', { className: 'mono', text: c.phone }));
+  if (listing && listing.phone) {
+    phoneCell.appendChild(el('span', { className: 'mono', text: listing.phone }));
   } else {
     phoneCell.className = 'mid';
     phoneCell.appendChild(el('b', { text: 'NONE' }));
@@ -254,16 +308,16 @@ function renderCandidateRow(c, index) {
   tr.appendChild(phoneCell);
 
   const revCell = el('td', { className: 'mono' });
-  if (c.reviewCount != null) {
-    const rating = c.rating != null ? c.rating.toFixed(1) : '?';
-    revCell.textContent = `${rating} · ${c.reviewCount}`;
+  if (listing && listing.reviewCount != null) {
+    const rating = listing.rating != null ? listing.rating.toFixed(1) : '?';
+    revCell.textContent = `${rating} · ${listing.reviewCount}`;
   } else {
     revCell.textContent = ',';
   }
   tr.appendChild(revCell);
 
   const statusCell = el('td', { className: 'mono' });
-  const bs = c.businessStatus || 'UNKNOWN';
+  const bs = (listing && listing.businessStatus) || 'UNKNOWN';
   statusCell.textContent = bs === 'OPERATIONAL' ? 'OPEN' : bs.replace(/_/g, ' ');
   if (bs !== 'OPERATIONAL') statusCell.classList.add('mid');
   tr.appendChild(statusCell);
@@ -466,19 +520,241 @@ async function addUrlCandidate() {
       : `${state.candidates.length} candidates, ${typed} added by hand`;
   renderResults(false);
 
-  if (replaced) {
-    setStatus(
-      'working',
-      'REPLACED',
-      `${candidate.placeId.slice(4)} was already in the table${
+  const replacedNote = replaced
+    ? `${candidate.placeId.slice(4)} was already in the table${
         replaced.name === candidate.name ? '' : ` as ${replaced.name}`
       }, so that row now holds ${candidate.name}. Anything checked on it was cleared.`
-    );
+    : null;
+
+  if (replaced) {
+    setStatus('working', 'REPLACED', replacedNote);
   }
 
+  // Read before clearing. The town box is deliberately left alone (several
+  // businesses in one town is the common case); the listing box is not, since
+  // it names one business.
+  const wanted = $('#f-url-listing').value.trim();
+  const lookupBy = $('#f-url-listing-by').value;
   $('#f-url').value = '';
   $('#f-url-name').value = '';
+  $('#f-url-listing').value = '';
   $('#f-url').focus();
+
+  // The optional half. The row is already in the table and already scannable;
+  // everything from here is an extra source, so a failure here says so and
+  // leaves the row alone rather than undoing an add that worked.
+  //
+  // Held busy for the duration. The lookup can take fifteen seconds, and the
+  // add button was live for all of it: adding the same host again inside that
+  // window replaced the row, and the first lookup's picker then wrote its own
+  // stale candidate back over the replacement, silently reverting a name the
+  // operator had just corrected. Found by the adversarial pass.
+  if (wanted !== '') {
+    state.busy = true;
+    $('#url-go').disabled = true;
+    $('#scan-go').disabled = true;
+    try {
+      await lookUpListingFor(candidate, wanted, lookupBy, replaced ? replacedNote : null);
+    } finally {
+      state.busy = false;
+      $('#url-go').disabled = false;
+      $('#scan-go').disabled = false;
+    }
+  }
+}
+
+/**
+ * Finds the Google listing for a business already in the table, and attaches
+ * it, or offers the choice when a name matches several.
+ *
+ * `by` is the operator's own answer, not a guess made from the string. A short
+ * business name and a Place ID are shaped alike, and guessing wrong either
+ * spends a request on nothing or attaches a different business.
+ */
+async function lookUpListingFor(candidate, text, by, priorNote) {
+  const withPrior = (body) => (priorNote ? `${priorNote} ${body}` : body);
+  setStatus('working', 'LOOKING UP THE LISTING…', text);
+
+  const req = by === 'placeId' ? { placeId: text } : { name: text };
+  let res;
+  try {
+    res = await api.discover.lookupListing(req);
+  } catch (e) {
+    res = { ok: false, error: { kind: 'internal', message: 'The app could not reach its own main process.', detail: String(e) } };
+  }
+
+  if (!res || !res.ok) {
+    const error = (res && res.error) || { kind: 'internal', message: 'Unknown failure.' };
+    // bad_request on this path means the operator typed something this box
+    // cannot use, and describeError's generic tail for that kind calls it an
+    // app bug worth reporting. Same reason addUrlCandidate avoids it.
+    const tail = error.kind === 'bad_request' ? '' : ` ${describeError(error).body}`;
+    setStatus(
+      'error',
+      'ADDED WITHOUT A LISTING',
+      withPrior(`${candidate.name} is in the table and can be checked. The listing lookup failed: ${error.message}${tail}`),
+      error.detail
+    );
+    return;
+  }
+
+  const listings = res.data.listings || [];
+  if (listings.length === 0) {
+    setStatus(
+      'empty',
+      'NO LISTING FOUND',
+      withPrior(`Google returned nothing for "${res.data.query}". ${candidate.name} is in the table and can be checked without a listing; the NAP check will record that it had nothing to compare.`)
+    );
+    return;
+  }
+
+  /**
+   * A Place ID is an exact identifier, so its one result is the answer and
+   * attaching it needs no confirmation. A NAME is not: places:searchText is a
+   * relevance search that returns its best guess, and one result means one
+   * best guess, not a match. A distinctive typo can return exactly one nearby
+   * competitor, and attaching it makes every NAP sentence a false accusation
+   * about a business this scan never identified. So a name always goes to the
+   * picker, even at one result, and the operator confirms it is the business
+   * they meant. Found by the adversarial pass.
+   */
+  if (by === 'placeId') {
+    await attachListingTo(candidate, listings[0], res.data.quotaDetail, priorNote);
+    return;
+  }
+  renderListingPicker(candidate, listings, res.data, priorNote);
+}
+
+/** The pick list, in the same box every other message on this view uses. */
+function renderListingPicker(candidate, listings, data, priorNote) {
+  const box = statusBox(
+    'empty',
+    'WHICH ONE IS IT?',
+    `${priorNote ? `${priorNote} ` : ''}Google returned ${listings.length} listings for "${data.query}". ` +
+      `Pick the one that is ${candidate.name}, or leave it: the row is already scannable without a listing.`
+  );
+
+  const list = el('div', { className: 'listing-picks' });
+  for (const listing of listings) {
+    const pick = el('button', {
+      className: 'btn btn--ghost listing-pick',
+      attrs: { type: 'button' },
+    });
+    pick.appendChild(el('b', { text: listing.name }));
+    if (listing.address) pick.appendChild(el('span', { className: 'cell-addr', text: listing.address }));
+    if (listing.phone) pick.appendChild(el('span', { className: 'mono', text: listing.phone }));
+    pick.addEventListener('click', () => void attachListingTo(candidate, listing, data.quotaDetail, null));
+    list.appendChild(pick);
+  }
+  box.appendChild(list);
+  box.appendChild(el('p', { className: 'results-footer__billing', text: data.quotaDetail }));
+  $('#scan-status').replaceChildren(box);
+}
+
+/**
+ * Sends the pick back to main, which attaches from ITS copy of the listing.
+ * Only the place id crosses the bridge: the rule that a listing can only come
+ * from a Places response is worth nothing if the renderer can post one.
+ */
+async function attachListingTo(candidate, listing, quotaDetail, priorNote) {
+  // The picker outlives the lookup, so the row can have been replaced or
+  // cleared between the search and the click. Attaching to the candidate the
+  // button closed over would write that older object back over the newer one.
+  if (!stillInTable(candidate)) {
+    setStatus(
+      'error',
+      'THAT ROW IS GONE',
+      `${candidate.name} was replaced or cleared while this listing was being chosen, so nothing was attached. Add it again and look the listing up from the fresh row.`
+    );
+    return;
+  }
+
+  let res;
+  try {
+    res = await api.discover.attachListing({ candidate, placeId: listing.placeId });
+  } catch (e) {
+    res = { ok: false, error: { kind: 'internal', message: 'The app could not reach its own main process.', detail: String(e) } };
+  }
+  if (!handled(res, 'Attaching the listing failed')) return;
+
+  if (!replaceCandidate(candidate, res.data)) {
+    setStatus(
+      'error',
+      'THAT ROW IS GONE',
+      `${candidate.name} was replaced or cleared while the listing was being attached, so nothing changed in the table.`
+    );
+    return;
+  }
+  // Same reason as detach: what the checks read has changed underneath any
+  // confirmation already taken for this business.
+  forgetConfirmationFor(candidate);
+  setStatus(
+    'working',
+    'LISTING ATTACHED',
+    `${priorNote ? `${priorNote} ` : ''}${res.data.name} now carries ${listing.name}` +
+      `${listing.address ? `, ${listing.address}` : ''}. ` +
+      'The NAP check has a second source to compare the site against, and the plain-words test can score vocabulary. ' +
+      'Read the row and confirm that is the right business before you scan.',
+    quotaDetail
+  );
+}
+
+/** Drops the listing again. Findings taken with it in place do not survive. */
+async function detachCandidateListing(candidate) {
+  let res;
+  try {
+    res = await api.discover.detachListing({ candidate });
+  } catch (e) {
+    res = { ok: false, error: { kind: 'internal', message: 'The app could not reach its own main process.', detail: String(e) } };
+  }
+  if (!handled(res, 'Detaching the listing failed')) return;
+
+  if (!replaceCandidate(candidate, res.data)) return;
+  forgetConfirmationFor(candidate);
+  setStatus(
+    'working',
+    'LISTING DETACHED',
+    `${res.data.name} has no listing again. Check it again before you generate anything: the findings on screen were measured against the listing that is now gone, and this cleared them along with any confirmation taken on them.`
+  );
+}
+
+/** True while `candidate` is still the object occupying its row. */
+function stillInTable(candidate) {
+  return state.candidates.some((c) => c === candidate);
+}
+
+/**
+ * Swaps one row's candidate and redraws. Returns false when the row is no
+ * longer held by the candidate the caller was working from, which is how a
+ * lookup that outlived its row fails loudly instead of writing a stale object
+ * back over a newer one.
+ *
+ * The redraw is whole-table on purpose, which drops every open findings panel:
+ * a finding measured with a listing attached is not a finding about a row
+ * without one, and leaving it on screen beside the changed row is how a stale
+ * claim gets confirmed. Same reasoning as re-adding a typed URL.
+ */
+function replaceCandidate(candidate, next) {
+  const at = state.candidates.findIndex((c) => c === candidate);
+  if (at === -1) return false;
+  state.candidates[at] = next;
+  renderResults(false);
+  return true;
+}
+
+/**
+ * Drops any confirmation held for this candidate.
+ *
+ * Attaching or detaching a listing changes what the checks read, so a
+ * confirmation taken before it is a confirmation of different findings.
+ * state.confirmations is keyed on the business name, and name is precisely the
+ * field an attach deliberately does NOT move, so nothing else would have
+ * invalidated it: the approval gate would have accepted a live confirmation
+ * against a superseded measurement. Clearing the DOM panel was never enough,
+ * whatever the old comment here said.
+ */
+function forgetConfirmationFor(candidate) {
+  state.confirmations = state.confirmations.filter((c) => c.candidateName !== candidate.name);
 }
 
 /** Swaps which form is showing. The key warning belongs to the area tab. */

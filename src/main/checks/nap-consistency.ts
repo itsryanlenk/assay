@@ -54,7 +54,7 @@
  * accusation this check exists to avoid.
  */
 
-import { Candidate, FlawFinding, FlawFix, Severity } from '../../shared/types';
+import { Candidate, FlawFinding, FlawFix, Severity, listingOf } from '../../shared/types';
 import { CheckContext, FlawCheck } from './types';
 import { cleanHeadline } from './headline';
 
@@ -565,7 +565,12 @@ function verdicts(a: Aspects, candidate: Candidate, placesPostalCode: string | n
               '@context': 'https://schema.org',
               '@type': 'LocalBusiness',
               name: candidate.name,
-              ...(candidate.phone ? { telephone: candidate.phone } : {}),
+              // The listing's number, not the candidate's own field, which is
+              // null on a typed candidate however good the attached listing
+              // is. Safe to paste here: this branch is only reached when the
+              // page already carries that number as text, so it is the
+              // corroborated one rather than a contested one.
+              ...(listingOf(candidate)?.phone ? { telephone: listingOf(candidate)?.phone } : {}),
               ...(placesPostalCode ? { address: { '@type': 'PostalAddress', postalCode: placesPostalCode } } : {}),
             },
             null,
@@ -600,11 +605,14 @@ function worst(list: Verdict[]): Verdict {
 /**
  * What the Google listing says about this business, or nulls.
  *
- * A typed candidate has no listing. Its name and town came from the operator,
- * and reading them as Google's turns a typo into an accusation: a town entered
- * as "Rockport, ME 00000" made extractPostalCode produce a severity-4 postal
- * mismatch citing a listing nobody consulted. Provenance decides, and anything
- * that is not a Places result is treated as no listing at all.
+ * A typed candidate has no listing OF ITS OWN. Its name and town came from the
+ * operator, and reading them as Google's turns a typo into an accusation: a
+ * town entered as "Rockport, ME 00000" made extractPostalCode produce a
+ * severity-4 postal mismatch citing a listing nobody consulted. Provenance
+ * decides, which is exactly why an ATTACHED listing may be read here and the
+ * candidate's own typed fields still may not: listingOf returns a listing only
+ * when one was minted from a Places response, never when a field merely
+ * happens to be filled in.
  */
 function listingFor(candidate: Candidate): {
   name: string | null;
@@ -612,14 +620,15 @@ function listingFor(candidate: Candidate): {
   streetNumber: string | null;
   postalCode: string | null;
 } {
-  if (candidate.source !== 'google-places-new') {
+  const listing = listingOf(candidate);
+  if (!listing) {
     return { name: null, phone: null, streetNumber: null, postalCode: null };
   }
   return {
-    name: candidate.name,
-    phone: candidate.phone,
-    streetNumber: leadingStreetNumber(candidate.address),
-    postalCode: extractPostalCode(candidate.address),
+    name: listing.name,
+    phone: listing.phone,
+    streetNumber: leadingStreetNumber(listing.address),
+    postalCode: extractPostalCode(listing.address),
   };
 }
 

@@ -271,9 +271,17 @@ export type VerdictCopy = {
 
 export const VERDICT_COPY: Record<string, VerdictCopy> = {
   // -- website ------------------------------------------------------------
+  /**
+   * These three used to say "on your listing" and "listed", which is true only
+   * when the scan started from a Places result. A scan that started from a
+   * typed web address has no listing, and now may have one carrying a
+   * DIFFERENT website than the one that was read, so the phrasing could name
+   * the wrong address as well as the wrong source. Every sentence here is
+   * scoped to the address this scan actually read, which is true either way.
+   */
   'website:unreachable': {
-    short: 'The website address on your listing does not answer with a working page.',
-    phrase: 'a listed website that no longer answers with a working page',
+    short: 'Your website address does not answer with a working page.',
+    phrase: 'a website address that no longer answers with a working page',
   },
   'website:js-only': {
     short: 'Your page is mostly scripts, and shows almost nothing to anything that cannot run them.',
@@ -284,16 +292,16 @@ export const VERDICT_COPY: Record<string, VerdictCopy> = {
     phrase: 'a homepage carrying almost no readable text for AI to learn the business from',
   },
   'website:parked': {
-    short: 'The address on your listing opens a placeholder page rather than your business.',
-    phrase: 'a listed web address opening a placeholder page rather than a business site',
+    short: 'Your web address opens a placeholder page rather than your business.',
+    phrase: 'a web address opening a placeholder page rather than a business site',
   },
   'website:no-title': {
     short: 'Your homepage has no title line in its markup.',
     phrase: 'a homepage with no title line in its markup',
   },
   'website:social-profile': {
-    short: 'The website on your listing is a social profile, so your presence lives on a platform someone else controls.',
-    phrase: 'a business whose only listed website is a social profile on a platform someone else controls',
+    short: 'Your website is a social profile, so your presence lives on a platform someone else controls.',
+    phrase: 'a business whose only website is a social profile on a platform someone else controls',
   },
   // -- freshness ----------------------------------------------------------
   'freshness:article-undated': {

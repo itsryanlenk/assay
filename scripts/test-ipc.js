@@ -208,6 +208,85 @@ async function run(win) {
     JSON.stringify(noName && noName.error)
   );
 
+  // --- 7c. the optional GBP attach on the typed door -----------------------
+  // Still no Places key at this point, which is the case that matters most:
+  // the attach is an extra, and its absence must not touch the keyless door.
+  const lookupNoKey = await inRenderer(
+    win,
+    `return await window.assay.discover.lookupListing({ name: 'Example Boutique Rockport ME' });`
+  );
+  check(
+    'discover:lookupListing says a key is needed rather than failing obscurely',
+    lookupNoKey && lookupNoKey.ok === false && lookupNoKey.error.kind === 'config' &&
+      /Settings/.test(lookupNoKey.error.message),
+    JSON.stringify(lookupNoKey && lookupNoKey.error)
+  );
+
+  const lookupEmpty = await inRenderer(
+    win,
+    `return await window.assay.discover.lookupListing({});`
+  );
+  check(
+    'discover:lookupListing refuses an empty request before it costs anything',
+    lookupEmpty && lookupEmpty.ok === false && lookupEmpty.error.kind === 'bad_request',
+    JSON.stringify(lookupEmpty && lookupEmpty.error)
+  );
+
+  // Both boxes filled is ambiguous, and guessing attaches a business the
+  // operator was not looking at.
+  const lookupBoth = await inRenderer(
+    win,
+    `return await window.assay.discover.lookupListing({ name: 'X', placeId: 'ChIJexample' });`
+  );
+  check(
+    'discover:lookupListing refuses a name and a Place ID together',
+    lookupBoth && lookupBoth.ok === false && lookupBoth.error.kind === 'bad_request',
+    JSON.stringify(lookupBoth && lookupBoth.error)
+  );
+
+  /**
+   * This channel takes a place id, not a listing, and looks it up in main's
+   * own register of what it minted. An id main never minted gets nothing.
+   *
+   * Scope, so this assertion is not read as more than it is: it closes THIS
+   * channel. checks:run, confirm:run and packet:generate all accept a whole
+   * candidate object from the renderer and always have, so a renderer that
+   * lies could still assert a listing, exactly as it could already assert a
+   * Places candidate. See the note in src/main/discovery/attach.ts.
+   */
+  const attachUnminted = await inRenderer(
+    win,
+    `const c = await window.assay.discover.fromUrl({ url: 'example-boutique.test', name: 'Example Boutique' });
+     return await window.assay.discover.attachListing({ candidate: c.data, placeId: 'ChIJneverMinted' });`
+  );
+  check(
+    'discover:attachListing refuses a listing main never minted',
+    attachUnminted && attachUnminted.ok === false && attachUnminted.error.kind === 'not_found',
+    JSON.stringify(attachUnminted && attachUnminted.error)
+  );
+
+  const attachNoCandidate = await inRenderer(
+    win,
+    `return await window.assay.discover.attachListing({ placeId: 'ChIJexample' });`
+  );
+  check(
+    'discover:attachListing requires a candidate',
+    attachNoCandidate && attachNoCandidate.ok === false && attachNoCandidate.error.kind === 'bad_request',
+    JSON.stringify(attachNoCandidate && attachNoCandidate.error)
+  );
+
+  const detached = await inRenderer(
+    win,
+    `const c = await window.assay.discover.fromUrl({ url: 'example-boutique.test', name: 'Example Boutique' });
+     return await window.assay.discover.detachListing({ candidate: c.data });`
+  );
+  check(
+    'discover:detachListing returns a candidate carrying no listing',
+    detached && detached.ok === true && !detached.data.listing &&
+      detached.data.source === 'operator-url',
+    JSON.stringify(detached && (detached.data || detached.error))
+  );
+
   // --- 8. app:openExternal scheme guard -----------------------------------
   const badScheme = await inRenderer(
     win,

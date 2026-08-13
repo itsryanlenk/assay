@@ -45,7 +45,7 @@
  * scopes itself to the pages actually read.
  */
 
-import { Candidate, FlawFinding, FlawFix, Severity } from '../../shared/types';
+import { Candidate, FlawFinding, FlawFix, Severity, listingOf } from '../../shared/types';
 import { CheckContext, FlawCheck } from './types';
 import { cleanHeadline } from './headline';
 
@@ -342,8 +342,13 @@ function verdicts(s: Signals, candidate: Candidate): Verdict[] {
     ? `the homepage or its contact page (${s.contactPagePath})`
     : 'the homepage';
 
-  const telSnippet = candidate.phone
-    ? `<a href="tel:+1${digitsOnly(candidate.phone)}">${candidate.phone}</a>`
+  // The listing's number, for the same reason placesPhone reads it: a typed
+  // candidate's own phone field is empty however good the attached listing,
+  // and the fix snippet handing over (555) 123-4567 beside a detail sentence
+  // naming the real number is self-contradictory in a client artifact.
+  const listingPhone = listingOf(candidate)?.phone ?? null;
+  const telSnippet = listingPhone
+    ? `<a href="tel:+1${digitsOnly(listingPhone)}">${listingPhone}</a>`
     : '<a href="tel:+15551234567">(555) 123-4567</a>';
 
   if (s.jsOnlyContactPath) {
@@ -582,7 +587,10 @@ export const bookingPathCheck: FlawCheck = {
 
     const rawSources = contactReadable ? [html, contact.body] : [html];
 
-    const placesPhone = ctx.candidate.phone;
+    // Every sentence below that names this number calls it the one Google
+    // lists, so it has to come from a listing and not from a candidate field
+    // an operator could have typed. listingOf answers that for both doors.
+    const placesPhone = listingOf(ctx.candidate)?.phone ?? null;
     const placesLast10 = placesPhone ? last10(digitsOnly(placesPhone)) : '';
     const readDigits = digitsOnly(rawSources.join(' '));
     const placesPhoneMissingFromSource = placesLast10.length === 10 && !readDigits.includes(placesLast10);

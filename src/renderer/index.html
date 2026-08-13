@@ -83,8 +83,19 @@
         <label for="f-url-town">Town (optional)</label>
         <input id="f-url-town" name="town" type="text" placeholder="Rockport, ME">
       </div>
+      <div class="field field--grow" data-tip="Optional, and the only part of this form that needs a Places key. Attaching the business's Google listing gives the NAP check a second source to compare the site against and lets the plain-words test score its vocabulary. Costs one billed Places request. The scan itself works without it.">
+        <label for="f-url-listing">Google listing (optional)</label>
+        <input id="f-url-listing" name="listing" type="text" placeholder="Business name, or a Place ID">
+      </div>
+      <div class="field field--narrow" data-tip="Which of the two you typed in the box. There is no guessing here: a short business name and a Place ID look alike enough that a wrong guess attaches the wrong business.">
+        <label for="f-url-listing-by">Look up by</label>
+        <select id="f-url-listing-by" name="listingBy">
+          <option value="name" selected>Name</option>
+          <option value="placeId">Place ID</option>
+        </select>
+      </div>
       <button class="btn btn--primary" id="url-go" type="submit"
-              data-tip="Add this business to the table. No network call happens until you press CHECK.">Add</button>
+              data-tip="Add this business to the table. No network call happens until you press CHECK, unless you asked for a listing, which is looked up now.">Add</button>
     </form>
 
     <form class="toolbar" id="scan-form" autocomplete="off">
@@ -327,9 +338,15 @@
         <li><b>1 · Find.</b> On <b>Scan</b>, either enter a city and a category and pull
           candidates from the Google Places API, or switch to <b>Scan a URL</b> and type the
           address of a business you already know, which needs no key. No Maps HTML is
-          scraped either way. A typed address carries no listing at all, so the NAP check
+          scraped either way. A typed address carries no listing, so the NAP check
           records that it had nothing to compare and can never report a mismatch, and the
-          schema kit says the facts came from you rather than from a listing.</li>
+          schema kit says the facts came from you rather than from a listing. If you do
+          have the business's Google listing, attach it by name or Place ID in the same
+          form: that is the one part of this door that needs a key, it costs one billed
+          request, and it gives the NAP check its second source and the plain-words test
+          the category it needs to score vocabulary. What you attach is what gets read;
+          the name, town and address you typed stay yours and are still labelled as
+          yours.</li>
         <li><b>2 · Check.</b> Press <b>Check</b> on a candidate to run the six flaw checks against
           its own fetched page source. Findings come back <b>REMOTE</b>: real, logged, and not
           yet safe to send.</li>

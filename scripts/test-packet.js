@@ -836,6 +836,130 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
     }).text;
     ok('a Places candidate still names the profile it came from',
       /Google Business Profile listing/.test(placesKit), '(Places provenance lost)');
+    // "even though the listing hands over a rating and a review count" is a
+    // claim about the listing, and Places omits absent fields, so a business
+    // with no reviews has neither.
+    ok('a listing with no rating is not said to hand one over',
+      !/hands over a rating/.test(SK.schemaKitRenderer({
+        candidate: { ...candidate, source: 'google-places-new', rating: null, reviewCount: null },
+        findings: [confirmedFinding], score: null, date: '2026-08-05', operator,
+      }).text),
+      '(claimed a rating the listing does not carry)');
+    ok('and one that does still says so',
+      /hands over a rating/.test(SK.schemaKitRenderer({
+        candidate: { ...candidate, source: 'google-places-new', rating: 4.5, reviewCount: 20 },
+        findings: [confirmedFinding], score: null, date: '2026-08-05', operator,
+      }).text),
+      '(the rating caveat was lost)');
+
+    /**
+     * A typed candidate with a listing attached is the third case, and it is
+     * the one a single "did this come from Places" flag gets wrong. The
+     * category, phone and address now DO come from a Google profile and must
+     * say so. The name that prints on every artifact and the address that was
+     * actually scanned still came from the operator, and claiming Google for
+     * those is the same fabricated attribution in the other direction.
+     */
+    const AT = require(path.join(ROOT, 'dist/main/main/discovery/attach.js'));
+    const attached = AT.attachListing(typed, AT.listingFromCandidate({
+      ...candidate,
+      name: 'Example Boutique of Rockport',
+      // 00000 on purpose: a real ZIP here trips this repo's own leak gate,
+      // which reads a street line beside a real city and ZIP as a business
+      // address. Caught by that gate while this test was being written.
+      address: '12 Harbor Rd, Rockport, ME 00000, USA',
+      phone: '(555) 000-1111',
+      primaryType: 'clothing_store',
+      website: 'https://listing-says-something-else.test/',
+      source: 'google-places-new',
+    })).data;
+    const attachedKit = SK.schemaKitRenderer({
+      candidate: attached, findings: [confirmedFinding], score: null, date: '2026-08-05', operator,
+    }).text;
+    ok('an attached listing is named as the source of the listing facts',
+      /category on that listing \("clothing_store"\)/.test(attachedKit),
+      (attachedKit.match(/.*`@type`.*/) || [''])[0]);
+    ok('and the profile is credited where its facts are discussed',
+      /Google Business Profile lists a number for you/.test(attachedKit), '(attached listing not credited)');
+    ok('the category comes from the listing rather than being called unreadable',
+      /ClothingStore/.test(attachedKit), '(listing category not used)');
+    ok('the name is still sourced to the operator, not to the profile',
+      /`name`: the details you gave us/.test(attachedKit),
+      (attachedKit.match(/.*`name`:.*/) || [''])[0]);
+    ok('and so is the address that was scanned, which is not the listing\'s website field',
+      /`url`: the address you gave us/.test(attachedKit),
+      (attachedKit.match(/.*`url`:.*/) || [''])[0]);
+    ok('the markup carries the scanned origin, never the listing\'s own website',
+      !/listing-says-something-else/.test(attachedKit), '(the listing website leaked into the kit)');
+    // The umbrella-category sentence is about a listing. A scan with no
+    // listing must not print it.
+    ok('a listing-less scan does not blame a listing for the missing category',
+      !/the listing files you under an umbrella/.test(kit),
+      (kit.match(/.*listing files you.*/) || [''])[0]);
+
+    /**
+     * Everything below was found by the adversarial pass on this change.
+     */
+
+    // A service-area business has no street line, so Google formats its
+    // address in three parts. Reading "USA" as the region made the town come
+    // out as "ME 00000", which then went into the title, meta description and
+    // llms.txt examples the owner is told to paste.
+    const serviceArea = AT.attachListing(typed, AT.listingFromCandidate({
+      ...candidate,
+      address: 'Rockport, ME 00000, USA',
+      primaryType: 'plumber',
+      source: 'google-places-new',
+    })).data;
+    const serviceKit = SK.schemaKitRenderer({
+      candidate: serviceArea, findings: [confirmedFinding], score: null, date: '2026-08-05', operator,
+    }).text;
+    ok('a listing with no street line still yields the town, not the region and ZIP',
+      /\| Rockport</.test(serviceKit) && !/ME 00000</.test(serviceKit),
+      (serviceKit.match(/.*<title>.*/) || [''])[0]);
+
+    // And a listing address that parses to no town at all must not delete the
+    // town the operator typed.
+    const townless = AT.attachListing(typed, AT.listingFromCandidate({
+      ...candidate, address: '', primaryType: 'plumber', source: 'google-places-new',
+    })).data;
+    ok('an unparseable listing address falls back to the typed town',
+      /Rockport/.test(SK.schemaKitRenderer({
+        candidate: townless, findings: [confirmedFinding], score: null, date: '2026-08-05', operator,
+      }).text),
+      '(the operator\'s town was dropped)');
+
+    // "Your Google Business Profile lists a number for you" is a claim about
+    // the listing. Google omits absent fields, so plenty of profiles have none.
+    const noPhone = AT.attachListing(typed, AT.listingFromCandidate({
+      ...candidate, phone: null, primaryType: 'plumber', source: 'google-places-new',
+    })).data;
+    const noPhoneKit = SK.schemaKitRenderer({
+      candidate: noPhone, findings: [confirmedFinding], score: null, date: '2026-08-05', operator,
+    }).text;
+    ok('a listing with no phone is not said to list one',
+      !/Google Business Profile lists a number for you/.test(noPhoneKit),
+      (noPhoneKit.match(/.*`telephone`.*/) || [''])[0]);
+    ok('and the kit says so plainly instead',
+      /No phone number came with the listing/.test(noPhoneKit),
+      (noPhoneKit.match(/.*`telephone`.*/) || [''])[0]);
+
+    // The name the kit publishes is the operator's, and after an attach it can
+    // differ from both the listing name and the site's. A proven disagreement
+    // has to be visible, exactly as it is for phone and address.
+    const nameDispute = {
+      ...confirmedFinding,
+      checkId: 'nap-consistency',
+      detail: 'Name: Google lists "Example Boutique LLC", the site\'s own structured data lists "Example Boutique Co". This does not change the severity above.',
+    };
+    const disputedNameKit = SK.schemaKitRenderer({
+      candidate: attached, findings: [nameDispute], score: null, date: '2026-08-05', operator,
+    }).text;
+    ok('a proven name disagreement is disclosed beside the name the kit publishes',
+      /not the same. Settle which one is right/.test(disputedNameKit),
+      (disputedNameKit.match(/.*`name`.*/) || [''])[0]);
+    ok('and a scan with no such finding stays quiet about it',
+      !/Settle which one is right/.test(attachedKit), '(volunteered a dispute nobody proved)');
   }
 
   // --- the closing ask: the house pitch, the operator's words, or nothing ---

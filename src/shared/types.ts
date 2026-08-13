@@ -59,9 +59,96 @@ export type Candidate = {
   primaryType: string | null;
   mapsUri: string | null;
   discoveredAt: string;              // ISO 8601
-  /** Where the candidate came from. A typed URL carries no listing fields. */
+  /**
+   * Where the candidate came from. A typed URL carries no listing fields of
+   * its own; if the operator attached one, it hangs off `listing` below, never
+   * on these fields, so nothing the operator typed can ever be read as
+   * something Google said.
+   */
   source: 'google-places-new' | 'operator-url';
+  /**
+   * A Google Business Profile the operator attached to a typed candidate.
+   * Absent on every candidate that did not get one. See AttachedListing.
+   */
+  listing?: AttachedListing | null;
 };
+
+/**
+ * A listing attached to a candidate that came in through the typed-URL door.
+ *
+ * The typed door exists so the scoring engine is reachable with no key and no
+ * billing, and its price is that two measurements have nothing to read: NAP
+ * consistency has no second source to compare the site against, and the
+ * plain-words vocabulary points have no category term. Both correctly mark
+ * themselves out rather than guess. This type is how an operator who DOES have
+ * a listing hands it over: their own self-scan, or a prospect they reached by
+ * URL and can identify on Google.
+ *
+ * It is deliberately a separate object rather than the same fields filled in
+ * on the Candidate. The rule that keeps a typed name and town from being
+ * reported as facts from a Google profile is provenance, not emptiness, and
+ * folding a listing onto the candidate's own fields would erase the
+ * distinction the moment anything read them. `source` stays 'operator-url'
+ * because that is still where the candidate came from; this says what was
+ * bolted on afterwards and where it came from.
+ *
+ * Minted in the main process from a Places response and nowhere else, which is
+ * what makes `source` below true rather than decorative.
+ */
+export type AttachedListing = {
+  /** Google's place id. NOT the candidate's placeId, which stays the ledger key. */
+  placeId: string;
+  name: string;
+  address: string;
+  location: { lat: number; lng: number } | null;
+  /** The website ON THE LISTING, which need not be the address the operator typed. */
+  website: string | null;
+  phone: string | null;
+  rating: number | null;
+  reviewCount: number | null;
+  businessStatus: string | null;
+  primaryType: string | null;
+  mapsUri: string | null;
+  attachedAt: string;                // ISO 8601
+  /** Only ever this. Nothing that is not a Places result may be built as one. */
+  source: 'google-places-new';
+};
+
+/**
+ * The one place anything asks "is there a Google listing for this business,
+ * and what does it say?".
+ *
+ * Two doors reach the same answer and the callers should not care which: a
+ * candidate discovered through Places IS a listing, and a typed candidate may
+ * have had one attached. Before this existed, both consumers tested
+ * `source !== 'google-places-new'` themselves, which is the kind of rule that
+ * gets a third copy and then a third copy that is subtly different.
+ *
+ * A Places candidate's own fields win over anything hanging off `listing`.
+ * They are the listing, so there is no precedence question to get wrong, and
+ * the attach path refuses such a candidate rather than relying on this.
+ */
+export function listingOf(candidate: Candidate): AttachedListing | null {
+  if (candidate.source === 'google-places-new') {
+    return {
+      placeId: candidate.placeId,
+      name: candidate.name,
+      address: candidate.address,
+      location: candidate.location,
+      website: candidate.website,
+      phone: candidate.phone,
+      rating: candidate.rating,
+      reviewCount: candidate.reviewCount,
+      businessStatus: candidate.businessStatus,
+      primaryType: candidate.primaryType,
+      mapsUri: candidate.mapsUri,
+      attachedAt: candidate.discoveredAt,
+      source: 'google-places-new',
+    };
+  }
+  const attached = candidate.listing;
+  return attached && attached.source === 'google-places-new' ? attached : null;
+}
 
 export type SearchPlacesRequest = {
   city: string;
@@ -83,6 +170,34 @@ export type SearchPlacesResponse = {
   quotaDetail: string;
   /** Echoed so the ledger and the UI agree on what was asked. */
   query: { textQuery: string; city: string; category: string };
+};
+
+/**
+ * Looking up a listing to attach to a candidate that was typed in.
+ *
+ * `name` and `placeId` are the two things an operator can plausibly have in
+ * front of them, and exactly one is used per request: a name gets a free-text
+ * search returning several to choose from, a Place ID gets that one listing.
+ */
+export type LookupListingRequest = {
+  name?: string;
+  placeId?: string;
+};
+
+export type SearchListingsResponse = {
+  listings: AttachedListing[];
+  /** What was actually asked, echoed so the UI and the log agree. */
+  query: string;
+  /** Per-request counts, for the band beside the results. */
+  quotaNote: string;
+  /** The static billing attribution for the field mask used. */
+  quotaDetail: string;
+};
+
+export type AttachListingRequest = {
+  candidate: Candidate;
+  /** Google's place id, from a listing this process minted earlier. */
+  placeId: string;
 };
 
 // ---------------------------------------------------------------------------
