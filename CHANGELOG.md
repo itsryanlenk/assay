@@ -65,6 +65,42 @@ packet workflow, hardened and audited, but not yet tagged.
 
 ### Fixed
 
+- Four ways the entity item denied a Person node its own captures carried.
+  A client packet reported "no human Person node" on all four properties in
+  it, seven days after the first fix for that sentence shipped, and each
+  property reached it down a different path. The human test required
+  whitespace in the name, so a single given name was not a human name. The
+  node collector stopped at the top of the graph, so a Person at `author` or
+  `founder` did not exist. `sameAs` and `@id` were read off an Organization
+  node that a personal-brand site does not have, printing "no sameAs, no
+  stable @id" beside nine `@id` values and a two-URL `sameAs`. And the schema
+  starter kit told all four to go and write the Person node they already had.
+  The entity node is now elected from what the graph presents as its subject
+  when no Organization node is at the top of it, a nested Organization has its
+  placement stated, and a Person the site carries is named in the note whether
+  or not the founder band is earned.
+- FAQ visibility was a word-for-word test against undecoded page text. An
+  apostrophe served as `&#x27;` read as a hidden question, and a price in its
+  own element read as a missing answer. Both sides of the comparison are now
+  normalised, and the answers are tested as well as the questions: a page
+  carrying every answer in full under questions worded with a pronoun is told
+  what was found instead of being told it has a Google structured-data policy
+  problem. The visibility band still turns on the marked-up question text
+  appearing on the page.
+- The AI-crawler note claimed google-extended and meta-externalagent were
+  "scored here as costing retrieval as well as training". The retrieval band
+  has never been computed from either of them, and Google documents
+  Google-Extended as limiting AI training and grounding in some of its other
+  systems while stating there is no separate opt-out for AI Overviews or AI
+  Mode. The sentence now says which band charged them and what blocking
+  Google-Extended does not do. No weight changed.
+- The capture manifest listed a crawler capture and an operator-browser
+  capture per URL and left them reading as independent observations. The
+  operator-browser rows are view-source the operator pasted, which is the same
+  server response the crawler received; on one packet the two files differed
+  by a trailing newline. The manifest now says what each source is and that
+  neither is a capture of the page after its JavaScript ran.
+
 - A placeholder marker only counts on a page thin enough to be a
   placeholder. "Coming soon" inside one of a news homepage's article
   headlines made the website check call a 342-kilobyte content site "a

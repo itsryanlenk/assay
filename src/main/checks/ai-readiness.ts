@@ -55,10 +55,6 @@ export const RETRIEVAL_BOTS = [
 /**
  * Bots that take you into a model's memory. Blocking these is a legitimate
  * choice, not automatically a flaw, so the finding says so.
- *
- * Two carry retrieval consequences as well, per Google's and Meta's own docs:
- * Google-Extended takes Gemini grounding with it, and meta-externalagent
- * indexes as well as trains. Noted for the copy, not double counted.
  */
 export const TRAINING_BOTS = [
   'gptbot',
@@ -71,7 +67,23 @@ export const TRAINING_BOTS = [
   'meta-externalagent',
 ];
 
-export const RETRIEVAL_ALSO_COST = ['google-extended', 'meta-externalagent'];
+/**
+ * Training bots whose owners also describe a second, non-training use, so the
+ * copy says which band actually charged them.
+ *
+ * The old name for this list was RETRIEVAL_ALSO_COST and the sentence it fed
+ * said these two "are scored here as costing retrieval as well as training".
+ * That sentence was wrong twice over. It was wrong about the arithmetic:
+ * `retrievalPts` is computed from RETRIEVAL_BOTS alone, so neither of these
+ * has ever cost a retrieval point. And it was wrong about Google, which
+ * documents Google-Extended as limiting AI training and grounding in some of
+ * its OTHER systems while stating there is no separate AI-Overviews or AI-Mode
+ * opt-out: Googlebot and the snippet controls are the switchboard for those.
+ * The house research digest quarantines "Google-Extended gates AIO" by name as
+ * a wrong mechanism, and this scanner was the thing re-importing it into
+ * client documents.
+ */
+export const DUAL_PURPOSE_BOTS = ['google-extended', 'meta-externalagent'];
 
 /** Parses robots.txt into per-agent disallow state. Lowercased agent names. */
 export function parseAgentBlocks(text: string): Map<string, boolean> {
@@ -169,6 +181,83 @@ function typesOf(n: Node): string[] {
 
 const hasType = (nodes: Node[], ...want: string[]) =>
   nodes.some((n) => typesOf(n).some((t) => want.includes(t)));
+
+/**
+ * Every typed node in a graph, at any depth.
+ *
+ * `extractJsonLd` flattens `@graph` and stops there, which is the right answer
+ * to "what does this page declare at its top level" and the wrong answer to
+ * "does a node of this type EXIST". schema.org's recommended shapes hang the
+ * interesting node one key down: a Person sits at `author`, `founder` or
+ * `creator`, a Service sits at hasOfferCatalog -> itemListElement ->
+ * itemOffered. A four-property client packet reported "no human Person node"
+ * on all four while three of the four carried a Person at `author` or
+ * `founder`, which is the same defect the Service walk already fixed, reached
+ * through a different door.
+ */
+function deepNodes(nodes: Node[], maxDepth = 8): Node[] {
+  const out: Node[] = [];
+  const seen = new Set<unknown>();
+  const walk = (v: unknown, depth: number): void => {
+    if (!v || typeof v !== 'object' || depth > maxDepth || seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x, depth + 1);
+      return;
+    }
+    const n = v as Node;
+    if (typesOf(n).length > 0) out.push(n);
+    for (const x of Object.values(n)) walk(x, depth + 1);
+  };
+  for (const n of nodes) walk(n, 0);
+  return out;
+}
+
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
+};
+
+/**
+ * One string, in a form comparable to the same words after a browser and a
+ * markup author have each had a go at them.
+ *
+ * The FAQ visibility test was a raw substring match of the marked-up question
+ * against tag-stripped page text, and it failed on differences no reader can
+ * see. A question carrying a plain apostrophe in the JSON-LD is served with
+ * that apostrophe as `&#x27;` in the HTML, so the check called it hidden and
+ * docked the site for markup nobody could read. An answer whose price sits in
+ * its own element renders with a space before the comma that follows it, so
+ * the answer missed too. Both are the same sentence to anyone looking at the
+ * page. (Neither example is quoted from the scan that found them: a scanned
+ * business's own copy does not belong in tracked source, and the term list
+ * cannot catch a product name it has never been told.)
+ *
+ * Entities are decoded, the curly punctuation a CMS substitutes is folded back
+ * to ASCII, and whitespace is dropped entirely, because whitespace is exactly
+ * what markup inserts. Needles here are whole questions and whole answers, so
+ * dropping spaces cannot make one match by accident.
+ */
+export function normalizeForComparison(s: string): string {
+  return s
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, ref: string) => {
+      const r = String(ref).toLowerCase();
+      if (r.startsWith('#')) {
+        const code = r.startsWith('#x') ? parseInt(r.slice(2), 16) : parseInt(r.slice(1), 10);
+        return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
+      }
+      return NAMED_ENTITIES[r] ?? m;
+    })
+    // Escaped rather than written out: the suite bans literal em and en
+    // dashes in source, and a dash class is the one place they belong.
+    .replace(/[\u2018\u2019\u201a\u201b\u2032]/g, "'")
+    .replace(/[\u201c\u201d\u201e\u2033]/g, '"')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/<[^>]+>/g, ' ')
+    .toLowerCase()
+    .replace(/\s+/g, '');
+}
 
 function attrText(html: string, re: RegExp): string | null {
   const m = re.exec(html);
@@ -276,9 +365,16 @@ export function scoreCrawlerAccess(robotsBody: string, robots: DocumentStatus): 
     if (trainingBlocked.length) parts.push(`${trainingBlocked.length} training crawler(s) blocked: ${trainingBlocked.join(', ')}`);
     if (retrievalBlocked.length) parts.push(`${retrievalBlocked.length} retrieval crawler(s) blocked: ${retrievalBlocked.join(', ')}`);
     else parts.push('retrieval left open');
-    const alsoCost = trainingBlocked.filter((b) => RETRIEVAL_ALSO_COST.includes(b));
-    if (alsoCost.length) {
-      parts.push(`${alsoCost.join(' and ')} are scored here as costing retrieval as well as training`);
+    const dual = trainingBlocked.filter((b) => DUAL_PURPOSE_BOTS.includes(b));
+    if (dual.length) {
+      parts.push(`${dual.join(' and ')} are counted against the training band only`);
+    }
+    if (trainingBlocked.includes('google-extended')) {
+      parts.push(
+        "blocking google-extended limits AI training and grounding in some of Google's other " +
+          'systems, and it does not remove the site from AI Overviews or AI Mode, which follow ' +
+          'googlebot and the snippet controls'
+      );
     }
   }
 
@@ -414,7 +510,7 @@ export function scoreEntitySchema(nodes: Node[], businessName: string): ItemResu
     'entertainmentbusiness', 'financialservice', 'childcare', 'shoppingcenter', 'travelagency',
     'drycleaningorlaundry', 'selfstorage', 'emergencyservice', 'sportsactivitylocation',
   ]);
-  const org = nodes.find((n) => {
+  const isBusinessNode = (n: Node): boolean => {
     const ts = typesOf(n);
     if (ts.some((t) => BUSINESS_TYPES.has(t) || t.endsWith('business') || t.endsWith('store'))) return true;
     // The telephone/address fallback must never elect a Person: humans carry
@@ -422,10 +518,58 @@ export function scoreEntitySchema(nodes: Node[], businessName: string): ItemResu
     // sameAs and @id readings to the wrong node.
     if (ts.includes('person')) return false;
     return typeof n['telephone'] === 'string' || typeof n['address'] === 'object';
-  });
+  };
+  const org = nodes.find(isBusinessNode);
   const website = hasType(nodes, 'website');
-  const sameAs = org && Array.isArray(org['sameAs']) && (org['sameAs'] as unknown[]).length > 0;
-  const hasId = Boolean(org && typeof org['@id'] === 'string');
+
+  /**
+   * THE ENTITY, which is not always an Organization node.
+   *
+   * sameAs and @id used to be read off `org` alone, so a site with no
+   * Organization node scored both bands zero and printed "no sameAs, no stable
+   * @id" beside a capture holding nine @id values and a two-URL sameAs. A
+   * personal-brand site is the ordinary case: the WebSite publishes a Person,
+   * the ProfilePage points `mainEntity` at that same Person, and the Person
+   * carries the @id and the profile links. The entity is right there and the
+   * graph says which node it is.
+   *
+   * The fallback fires ONLY when no business node was elected, so nothing a
+   * business node already answered changes, and a bare Organization never
+   * borrows a Person's sameAs to look better than it is. The Organization band
+   * is untouched either way: 8 points still require an Organization node, and
+   * the note still reports its absence.
+   */
+  const REFERENCE_KEYS = ['mainentity', 'about', 'publisher', 'author', 'creator'];
+  const referenced = new Set<string>();
+  for (const n of nodes) {
+    for (const [k, v] of Object.entries(n)) {
+      if (!REFERENCE_KEYS.includes(k.toLowerCase())) continue;
+      const id =
+        typeof v === 'string' ? v : v && typeof v === 'object' ? (v as Node)['@id'] : undefined;
+      if (typeof id === 'string' && id !== '') referenced.add(id);
+    }
+  }
+  const all = deepNodes(nodes);
+  /**
+   * A business node one key down is still a business node, and saying "no
+   * Organization node" over the top of it repeats the bug this fallback was
+   * added to fix. The 8 points still require it at the top of the graph,
+   * which is the rubric, so the note states the placement instead of denying
+   * the node, the same resolution this check already uses for a Service
+   * nested in an offer catalog.
+   */
+  const nestedOrg = org ? undefined : all.find(isBusinessNode);
+  const referencedSubject = org
+    ? undefined
+    : all.find((n) => typeof n['@id'] === 'string' && referenced.has(n['@id'] as string));
+  const subject = nestedOrg ?? referencedSubject;
+  const entity = org ?? subject;
+
+  const sameAs =
+    Boolean(entity) &&
+    Array.isArray(entity!['sameAs']) &&
+    (entity!['sameAs'] as unknown[]).length > 0;
+  const hasId = Boolean(entity && typeof entity['@id'] === 'string');
 
   /**
    * A Person node whose name is the SITE name is usually not a human: the
@@ -437,9 +581,19 @@ export function scoreEntitySchema(nodes: Node[], businessName: string): ItemResu
    * human Person node". Name equality is a soft signal, not a disqualifier:
    * a same-named Person still counts when it carries properties only a human
    * profile states, or when the org's founder references its @id.
+   *
+   * TWO MORE DOORS TO THE SAME FALSE SENTENCE, found when it shipped again a
+   * week later into four client packets at once. First, the name test required
+   * whitespace, so a single given name was not a human name: every Person in
+   * that packet was a mononym and all four were rejected on a rule the rubric
+   * never states. Second, `people` read the top of the graph only, so a Person
+   * at `author` or `founder` did not exist as far as this check was concerned.
+   * The soft signal now covers the case the whitespace rule was reaching for
+   * anyway: a Person whose name is a word out of the business name still has
+   * to look human, so a brand wearing a Person node is still refused.
    */
-  const people = nodes.filter((n) => typesOf(n).includes('person'));
-  const founderRaw = org ? org['founder'] : undefined;
+  const people = all.filter((n) => typesOf(n).includes('person'));
+  const founderRaw = entity ? entity['founder'] : undefined;
   const founderId =
     typeof founderRaw === 'string'
       ? founderRaw
@@ -450,28 +604,55 @@ export function scoreEntitySchema(nodes: Node[], businessName: string): ItemResu
   const looksHuman = (p: Node): boolean =>
     Object.keys(p).some((k) => HUMAN_ONLY_PROPS.includes(k.toLowerCase())) ||
     (typeof founderId === 'string' && founderId !== '' && p['@id'] === founderId);
+  const brand = businessName.trim().toLowerCase();
+  const isBrandWord = (nm: string): boolean => {
+    const n = nm.trim().toLowerCase();
+    if (n === '' || brand === '') return false;
+    if (n === brand) return true;
+    return new RegExp(`(^|\\W)${escapeRe(n)}($|\\W)`).test(brand);
+  };
   const realPerson = people.some((p) => {
     const nm = typeof p['name'] === 'string' ? p['name'].trim() : '';
-    if (nm.length === 0 || !/\s/.test(nm)) return false;
-    return nm.toLowerCase() !== businessName.toLowerCase() || looksHuman(p);
+    if (nm.length === 0) return false;
+    return !isBrandWord(nm) || looksHuman(p);
   });
   const founder = Boolean(founderRaw);
 
   let earned = 0;
   const have: string[] = [];
   const missing: string[] = [];
-  if (org) { earned += 8; have.push('Organization'); } else missing.push('no Organization node');
+  if (org) { earned += 8; have.push('Organization'); }
+  else if (nestedOrg) missing.push('no Organization node at the top of the graph');
+  else missing.push('no Organization node');
   if (website) { earned += 3; have.push('WebSite'); } else missing.push('no WebSite node');
   if (sameAs) { earned += 3; have.push('sameAs'); } else missing.push('no sameAs');
   if (founder && realPerson) { earned += 4; have.push('founder Person'); }
-  else missing.push(realPerson ? 'no founder property' : 'no human Person node');
+  // Never "no human Person node" while one is in the file. When the band goes
+  // unearned because nothing links the Person the site does carry, the note
+  // has to say that, or the owner is sent to add a node they already have.
+  else if (realPerson) missing.push('a Person node is present with no founder property linking it');
+  else missing.push('no human Person node');
   if (hasId) { earned += 2; have.push('@id'); } else missing.push('no stable @id');
+
+  // Say which node the two entity bands were read off whenever it was not a
+  // top-level business node, so "sameAs + @id" cannot be mistaken for an
+  // Organization that is not there. The nested-org case says its own piece in
+  // the missing list above, so this clause covers the subject-node case only.
+  const subjectClause = nestedOrg
+    ? ' An Organization node is nested inside another node; this rubric awards those 8 points for one at the top of the graph.'
+    : subject && (sameAs || hasId)
+      ? ` The sameAs and @id here sit on the ${
+          typesOf(subject).includes('person') ? 'Person' : 'entity'
+        } node the page names as its subject, since there is no Organization node to carry them.`
+      : '';
 
   return {
     id: 'entity-schema',
     earned,
     na: false,
-    note: `${have.length ? have.join(' + ') : 'nothing usable'}${missing.length ? '; ' + missing.join(', ') : ''}.`,
+    note:
+      `${have.length ? have.join(' + ') : 'nothing usable'}` +
+      `${missing.length ? '; ' + missing.join(', ') : ''}.${subjectClause}`,
   };
 }
 
@@ -511,23 +692,58 @@ export function scoreFaqPage(
     };
   }
 
-  const questions: string[] = [];
+  const questions: { name: string; answer: string }[] = [];
   for (const f of faq) {
     const main = f['mainEntity'];
-    if (Array.isArray(main)) {
-      for (const q of main as Node[]) if (typeof q['name'] === 'string') questions.push(q['name']);
+    if (!Array.isArray(main)) continue;
+    for (const q of main as Node[]) {
+      if (typeof q['name'] !== 'string') continue;
+      const a = q['acceptedAnswer'];
+      const answer =
+        a && typeof a === 'object' && typeof (a as Node)['text'] === 'string'
+          ? ((a as Node)['text'] as string)
+          : '';
+      questions.push({ name: q['name'], answer });
     }
   }
 
   // Never credit markup for questions that are not on the page. Hidden FAQ
-  // schema is a penalty risk, not a shortcut.
-  const lower = visibleText.toLowerCase();
-  const visibleCount = questions.filter((q) => lower.includes(q.toLowerCase().slice(0, 30))).length;
+  // schema is a penalty risk, not a shortcut. The comparison is normalised on
+  // both sides now: the old raw substring test called an entity-encoded
+  // apostrophe a hidden question.
+  const hay = normalizeForComparison(visibleText);
+  const onPage = (s: string): boolean => {
+    const needle = normalizeForComparison(s);
+    return needle !== '' && hay.includes(needle);
+  };
+  const visibleCount = questions.filter((q) => onPage(q.name)).length;
   const allVisible = questions.length > 0 && visibleCount === questions.length;
+
+  /**
+   * ANSWERS, because the question wording is not the whole claim.
+   *
+   * A packet told a client it had a Google structured-data problem it does not
+   * have. All five of its answers were on the page word for word, in order,
+   * under questions the page writes with a pronoun where the markup names the
+   * product by name. The visibility band still turns on the marked-up question
+   * text appearing, which is the rubric and is unchanged. The SENTENCE has to
+   * stop naming a policy violation when the content it is about is sitting on
+   * the page.
+   */
+  const answersOnPage = questions.filter((q) => onPage(q.answer)).length;
+  const allAnswersOnPage = questions.length > 0 && answersOnPage === questions.length;
 
   let earned = 6;
   if (allVisible) earned += 5;
   if (faqOnPrimaryPage) earned += 4;
+
+  const visibility = allVisible
+    ? '.'
+    : allAnswersOnPage
+      ? `, and all ${answersOnPage} answer(s) are on the page in the wording the markup uses. ` +
+        'The questions are worded differently there, and this rubric awards the visibility band ' +
+        'where the marked-up question text itself appears.'
+      : ". Google's structured-data guidelines require marked-up questions to be visible on the page.";
 
   return {
     id: 'faq-page',
@@ -535,7 +751,7 @@ export function scoreFaqPage(
     na: false,
     note:
       `FAQPage present with ${questions.length} question(s), ${visibleCount} of them also found in the page text` +
-      (allVisible ? '.' : ". Google's structured-data guidelines require marked-up questions to be visible on the page.") +
+      visibility +
       (faqOnPrimaryPage
         ? ' It sits on a primary landing or service page, the placement this rubric awards.'
         : ' It was not found on a primary landing or service page, the placement this rubric awards.'),

@@ -513,6 +513,192 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
       A.scoreFaqPage([], 'no faq here', true).earned, 0);
   }
 
+  /**
+   * ROUND 2 of the scorers denying what their own captures carry, from a
+   * four-property client packet where the same false sentence shipped a
+   * second time, seven days after the first fix. Each case below was
+   * reproduced against that packet's own evidence before a line was changed,
+   * and each one is a DIFFERENT code path reaching the same wrong sentence.
+   */
+  {
+    // --- A mononym is a human name ---------------------------------------
+    // Every Person node in the packet was named with a single given name, and
+    // the human test required whitespace in the name, so it rejected all four
+    // on a rule nobody had ever stated: that a person must have two names.
+    const mononym = {
+      '@type': 'Person', '@id': 'https://solo.test/#lee', name: 'Lee',
+      jobTitle: 'Product designer', knowsAbout: ['product design'],
+      sameAs: ['https://profiles.example.test/lee'],
+    };
+    const orgWithFounder = {
+      '@type': 'Organization', '@id': 'https://solo.test/#org', name: 'Sample Studio',
+      founder: { '@id': 'https://solo.test/#lee' }, sameAs: ['https://profiles.example.test/studio'],
+    };
+    const site = { '@type': 'WebSite', '@id': 'https://solo.test/#website', name: 'Sample Studio' };
+    const mono = A.scoreEntitySchema([mononym, orgWithFounder, site], 'Sample Studio');
+    eq('a Person with one given name is still a human',
+      /no human Person node/.test(mono.note), false);
+    eq('and the mononym earns the founder band', mono.earned, 20);
+
+    // The brand-masquerade guard has to survive that loosening. A Person whose
+    // single name is a word out of the business name, carrying nothing a human
+    // profile states, is the brand wearing a Person node.
+    const brandToken = { '@type': 'Person', name: 'Acme' };
+    const acmeOrg = {
+      '@type': 'Organization', '@id': 'https://acme.test/#org', name: 'Acme Widgets',
+      founder: { '@id': 'https://acme.test/#x' },
+    };
+    eq('a bare Person named after a word in the brand is still not a human',
+      /no human Person node/.test(A.scoreEntitySchema([brandToken, acmeOrg], 'Acme Widgets').note), true);
+
+    // --- A Person attached to the node that names it ----------------------
+    // author, founder and creator are the schema.org shapes for saying who
+    // made a thing, and the packet used all three. The type collector stopped
+    // at the top of the graph, so a Person one key down was invisible, which
+    // is the same class as the hasOfferCatalog Service bug fixed last round.
+    const authored = {
+      '@type': 'SoftwareApplication', name: 'Sample App',
+      author: { '@type': 'Person', name: 'Lee', url: 'https://profiles.example.test/lee' },
+    };
+    eq('a Person nested at author is not called absent',
+      /no human Person node/.test(A.scoreEntitySchema([authored], 'Sample App').note), false);
+    const foundedOrg = {
+      '@type': 'Organization', '@id': 'https://tools.test/#org', name: 'Sample Tools',
+      sameAs: ['https://profiles.example.test/tools'],
+      founder: { '@type': 'Person', name: 'Lee', jobTitle: 'Founder' },
+    };
+    const founded = A.scoreEntitySchema(
+      [foundedOrg, { '@type': 'WebSite', name: 'Sample Tools' }], 'Sample Tools');
+    eq('a Person nested at founder is not called absent',
+      /no human Person node/.test(founded.note), false);
+    eq('and it earns the founder band it was always meant to', founded.earned, 20);
+
+    // A Person the graph carries but nothing declares as founder must be
+    // NAMED as present, not reported as missing under a different word.
+    eq('an unlinked Person is reported as present, with the rubric reason',
+      /Person node is present/.test(A.scoreEntitySchema([authored], 'Sample App').note), true);
+
+    // --- sameAs and @id belong to the entity, whatever type it carries -----
+    // A personal-brand site declares a Person as its subject: the WebSite
+    // publishes it, the ProfilePage points mainEntity at it, and it carries
+    // the @id and the sameAs. Reading both bands off an Organization node
+    // that does not exist printed "no sameAs, no stable @id" beside a capture
+    // holding nine @ids and a two-URL sameAs.
+    const profileGraph = [
+      { '@type': 'WebSite', '@id': 'https://lee.test/#website', name: 'Lee',
+        publisher: { '@id': 'https://lee.test/#lee' } },
+      { '@type': 'ProfilePage', '@id': 'https://lee.test/#webpage',
+        mainEntity: { '@id': 'https://lee.test/#lee' } },
+      { '@type': 'Person', '@id': 'https://lee.test/#lee', name: 'Lee', jobTitle: 'Product designer',
+        sameAs: ['https://profiles.example.test/lee', 'https://profiles.example.test/lee2'] },
+    ];
+    const profile = A.scoreEntitySchema(profileGraph, 'Lee Sample');
+    eq('a profile site is never told it has no sameAs',
+      /no sameAs/.test(profile.note), false);
+    eq('nor that it has no stable @id',
+      /no stable @id/.test(profile.note), false);
+    eq('the missing Organization node is still reported',
+      /no Organization node/.test(profile.note), true);
+    eq('and the note says which node those two bands were read off',
+      /names as its subject/.test(profile.note), true);
+    eq('WebSite 3 + sameAs 3 + @id 2, with the Organization 8 unearned', profile.earned, 8);
+
+    // Found in this branch's own adversarial pass, on a hole this branch dug.
+    // The subject fallback would elect an Organization nested at `publisher`,
+    // read its sameAs and @id, and print "no Organization node" in the same
+    // sentence. The rubric still awards the 8 for a top-level node only, so
+    // the note states the placement rather than denying the node.
+    const nestedOrgGraph = [
+      { '@type': 'Article', '@id': 'https://news.test/#post', headline: 'A post',
+        publisher: { '@type': 'Organization', '@id': 'https://news.test/#org', name: 'Sample News',
+          sameAs: ['https://profiles.example.test/news'] } },
+    ];
+    const nested = A.scoreEntitySchema(nestedOrgGraph, 'Sample News');
+    eq('a nested Organization is never flatly denied',
+      /no Organization node,/.test(nested.note), false);
+    eq('the note says where it actually sits',
+      /nested inside another node/.test(nested.note), true);
+    eq('its sameAs and @id are read off it', nested.earned, 5);
+    eq('and the subject clause does not claim a Person carried them',
+      /names as its subject/.test(nested.note), false);
+
+    // The subject fallback must never fire while a real business node exists.
+    const bothPresent = A.scoreEntitySchema(
+      [{ '@type': 'Organization', name: 'X Co' },
+       { '@type': 'Person', '@id': 'https://x.test/#p', name: 'Lee', jobTitle: 'Owner',
+         sameAs: ['https://profiles.example.test/lee'] }],
+      'X Co');
+    eq('a bare Organization does not borrow a Person sameAs',
+      /no sameAs/.test(bothPresent.note), true);
+    eq('nor its @id', /no stable @id/.test(bothPresent.note), true);
+  }
+
+  /**
+   * FAQ visibility was a word-for-word test against undecoded page text, so an
+   * apostrophe written as an entity read as a hidden question, and a paraphrase
+   * of a question whose ANSWER is on the page read as a Google policy problem.
+   * One packet was told it had a structured-data violation it does not have.
+   */
+  {
+    const qa = (name, text) => ({
+      '@type': 'Question', name, acceptedAnswer: { '@type': 'Answer', text },
+    });
+
+    // An HTML entity in the rendered copy is the same character as the one in
+    // the markup, and the page IS showing the question.
+    const entityFaq = [{ '@type': 'FAQPage', mainEntity: [qa("What's included?", 'Ten pages.')] }];
+    eq('an entity-encoded apostrophe still counts as a visible question',
+      A.scoreFaqPage(entityFaq, 'What&#x27;s included? Ten pages.', true).earned, 15);
+    eq('and a curly apostrophe on the page counts too',
+      A.scoreFaqPage(entityFaq, 'What’s included? Ten pages.', true).earned, 15);
+
+    // Markup splits a price into its own element, so the page text carries a
+    // space the answer string does not. That is the same sentence, and the
+    // answer test has to read it as one.
+    const priceFaq = [{ '@type': 'FAQPage',
+      mainEntity: [qa('How much does Sample App cost?', '$40, billed once. No renewal.')] }];
+    eq('a space introduced by markup does not hide an answer',
+      /1 answer\(s\) are on the page/.test(
+        A.scoreFaqPage(priceFaq, 'How much does it cost? $40 , billed once. No renewal.', true).note), true);
+
+    // The false accusation. Every answer is on the page in full; the questions
+    // are written with a pronoun where the markup names the product.
+    const paraphrased = [{ '@type': 'FAQPage', mainEntity: [
+      qa('How much does Sample App cost?', '$40, billed once.'),
+      qa('Does Sample App need an account?', 'No. It works without one.'),
+    ] }];
+    const visibleParaphrase =
+      'How much does it cost? $40 , billed once. Does it need an account? No. It works without one.';
+    const soft = A.scoreFaqPage(paraphrased, visibleParaphrase, true);
+    eq('a paraphrased question with its answer on the page is not a policy problem',
+      /structured-data guidelines/.test(soft.note), false);
+    eq('the note says the answers were found', /answer\(s\) are on the page/.test(soft.note), true);
+    eq('and the visibility band stays unearned, which is the rubric', soft.earned, 10);
+
+    // Markup nobody can read on the page is still the real finding, and it
+    // still gets the guidelines sentence.
+    const hidden = [{ '@type': 'FAQPage', mainEntity: [qa('Do you deliver?', 'Yes, county wide.')] }];
+    eq('genuinely hidden FAQ markup still draws the guidelines sentence',
+      /structured-data guidelines/.test(A.scoreFaqPage(hidden, 'unrelated copy', true).note), true);
+  }
+
+  /**
+   * The scanner was re-importing a mechanism the house research had already
+   * quarantined by name: that blocking Google-Extended costs AI-search
+   * retrieval. It does not, per Google's own documentation, and the scoring
+   * here never charged it against the retrieval band either. The sentence was
+   * wrong about Google AND wrong about this instrument's own arithmetic.
+   */
+  {
+    const blocked = A.scoreCrawlerAccess(
+      'User-agent: Google-Extended\nDisallow: /\nUser-agent: GPTBot\nDisallow: /', 'present');
+    eq('blocking a training crawler leaves the retrieval band whole', blocked.earned, 12 + 10);
+    eq('and the note no longer claims retrieval was charged for it',
+      /costing retrieval as well as training/.test(blocked.note), false);
+    eq('the note states what blocking Google-Extended does not do',
+      /AI Overviews/.test(blocked.note), true);
+  }
+
   // Rule 3, which was dead code for the whole project: the only call site
   // passed no opts, so the refusal could never fire and a number was always
   // printed, including for a one-page capture of a multi-page site.

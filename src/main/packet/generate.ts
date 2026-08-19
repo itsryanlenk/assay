@@ -451,6 +451,28 @@ export function renderCaptureManifest(findings: FlawFinding[]): {
     'URLs are shown as code rather than as links. They came off the scanned site',
     'and this document does not make third-party text clickable.',
     '',
+    /**
+     * What the Source column MEANS, because a reader was entitled to assume
+     * more than it says.
+     *
+     * A client packet listed a crawler capture and an operator-browser capture
+     * per URL and the two read as independent observations. They are not. The
+     * crawler row is this app fetching the URL. The operator-browser row is
+     * source the operator copied out of their own browser view-source, which
+     * is the same server response, and on one packet the two files differed by
+     * a single trailing newline. Neither is the page after its JavaScript ran.
+     * That distinction decides nothing on a server-rendered site and decides
+     * everything on a script-rendered one, where the server response can be
+     * forty words and the two sets agree on all forty of them.
+     */
+    'The Source column says how the bytes were obtained, and the two values are',
+    'not independent readings of the page. `crawler` is this app requesting the',
+    'URL. `operator-browser` is source the operator copied out of their own',
+    'browser view-source and pasted in, which is the same server response their',
+    'browser received. Neither one is a capture of the page after its JavaScript',
+    'ran, so on a script-rendered site both sets show the server HTML and',
+    'agreement between them says nothing about what a reader sees.',
+    '',
     '`_not kept_` means the fetch succeeded and writing it to disk did not. The',
     'finding still stands on the hash and the byte count recorded at fetch time;',
     'the bytes themselves are simply not here to re-read.',
