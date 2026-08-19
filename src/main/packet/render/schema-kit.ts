@@ -442,21 +442,45 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   // --- Section 2 ------------------------------------------------------
   lines.push('## 2. Owner or founder Person node');
   lines.push('');
-  lines.push(
-    `Not included. Nothing in this scan's evidence names an owner or founder anywhere on ${candidate.name}'s own ` +
-      'pages, and a fact needs an origin before it gets published here (Law 1 of this kit). If you want a founder ' +
-      'property on the organization node, add a Person node once you have a name confirmed on your own About or ' +
-      'Team page, give it a stable `@id`, and point to it like this:'
-  );
+  /**
+   * The same false claim as the scorecard's, in the document the client is
+   * told to paste.
+   *
+   * This section said "Nothing in this scan's evidence names an owner or
+   * founder" unconditionally, so four client packets whose captures each
+   * carried a Person node were handed a kit telling them to go and write one.
+   * The entity item has already read every capture and reported whether a
+   * human Person is in there; this reads its answer rather than assuming.
+   */
+  const entityItem = score?.items.find((i) => i.id === 'entity-schema');
+  const personFound = Boolean(entityItem && /founder Person|Person node is present/.test(entityItem.note));
+  if (personFound) {
+    lines.push(
+      `Already on the page. This scan found a Person node in ${candidate.name}'s own markup, so nothing here ` +
+        'needs writing from scratch. What the entity item looks for beside it is a `founder` property on the ' +
+        'organization node pointing at that Person by `@id`, which is what ties the human to the business:'
+    );
+  } else {
+    lines.push(
+      `Not included. Nothing in this scan's evidence names an owner or founder anywhere on ${candidate.name}'s own ` +
+        'pages, and a fact needs an origin before it gets published here (Law 1 of this kit). If you want a founder ' +
+        'property on the organization node, add a Person node once you have a name confirmed on your own About or ' +
+        'Team page, give it a stable `@id`, and point to it like this:'
+    );
+  }
   lines.push('');
   lines.push('```json');
   lines.push(`"founder": { "@id": "${origin ? origin + '/#owner' : '#owner'}" }`);
   lines.push('```');
   lines.push('');
   lines.push(
-    'Then add a `Person` node elsewhere in the same `@graph` carrying that `@id`, the name, and a `knowsAbout` ' +
-      'array naming what they are actually known for. `knowsAbout` on the Person node is the plain-language ' +
-      'topic-authority signal AI assistants read; worth the extra few minutes once a real name exists to attach it to.'
+    personFound
+      ? 'Use the `@id` the Person node already carries rather than the placeholder above, and check it also ' +
+          'carries a `knowsAbout` array naming what that person is actually known for. `knowsAbout` on the Person ' +
+          'node is the plain-language topic-authority signal AI assistants read.'
+      : 'Then add a `Person` node elsewhere in the same `@graph` carrying that `@id`, the name, and a `knowsAbout` ' +
+          'array naming what they are actually known for. `knowsAbout` on the Person node is the plain-language ' +
+          'topic-authority signal AI assistants read; worth the extra few minutes once a real name exists to attach it to.'
   );
   lines.push('');
 

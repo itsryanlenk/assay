@@ -669,6 +669,48 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
     ok('a specific Places type is still used',
       /"@type": "ClothingStore"/.test(kitFor('clothing_store')), 'clothing_store did not map');
 
+    /**
+     * The kit told four client packets to write a Person node each of their
+     * captures already carried. Section 2's "nothing in this scan's evidence
+     * names an owner or founder" was unconditional, so it shipped beside an
+     * entity item that had just read one. This is the same false claim as the
+     * scorecard's, in the document the client is told to paste.
+     */
+    const kitWithEntity = (entityNote) => SK.schemaKitRenderer({
+      candidate: { ...candidate, primaryType: 'clothing_store' },
+      findings: [{ ...confirmedFinding, checkId: 'ai-readiness', score: scored }],
+      score: {
+        ...scored,
+        items: [
+          ...scored.items,
+          { id: 'entity-schema', label: 'Entity schema', earned: 8, possible: 20, na: false, note: entityNote },
+        ],
+      },
+      date: '2026-07-31', operator,
+    }).text;
+    const sectionTwo = (text) => text.slice(text.indexOf('## 2.'), text.indexOf('## 3.'));
+
+    const foundKit = sectionTwo(kitWithEntity(
+      'WebSite + sameAs; no Organization node, a Person node is present with no founder property linking it.'));
+    ok('the kit never tells a site to write the Person node it already has',
+      !/Nothing in this scan's evidence names an owner or founder/.test(foundKit), foundKit.slice(0, 240));
+    ok('it says the Person is already on the page',
+      /found a Person node/.test(foundKit), foundKit.slice(0, 240));
+    ok('and still asks for the founder property, which is what was missing',
+      /"founder": \{ "@id"/.test(foundKit), foundKit.slice(0, 400));
+
+    const awardedKit = sectionTwo(kitWithEntity('Organization + WebSite + founder Person.'));
+    ok('a site that already earned the founder band is not told to write one either',
+      !/Nothing in this scan's evidence names an owner or founder/.test(awardedKit), awardedKit.slice(0, 240));
+
+    const absentKit = sectionTwo(kitWithEntity(
+      'Organization + WebSite; no sameAs, no human Person node, no stable @id.'));
+    ok('a site with genuinely no Person still gets the write-one instructions',
+      /Nothing in this scan's evidence names an owner or founder/.test(absentKit), absentKit.slice(0, 240));
+    ok('and a scan whose entity item never ran keeps the same instructions',
+      /Nothing in this scan's evidence names an owner or founder/.test(sectionTwo(kitFor('clothing_store'))),
+      'no entity item changed the copy');
+
     // Section 5 is about robots.txt and llms.txt, not about FAQ markup.
     const section5 = umbrella.slice(umbrella.indexOf('## 5.'), umbrella.indexOf('## 6.'));
     ok('section 5 does not dump the whole readiness detail into the kit',
