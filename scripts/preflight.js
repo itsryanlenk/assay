@@ -105,7 +105,35 @@ try {
 const COV = require('./scrub-coverage.js');
 const dataRoots = [process.env.ASSAY_DATA_DIR, path.join(ROOT, 'data')].filter(Boolean);
 const scannedNames = [...new Set(dataRoots.flatMap((r) => COV.harvestScannedNames(r)))];
-const uncovered = scrub.present ? COV.missingCoverage(scannedNames, terms) : [];
+
+/**
+ * GATE 3b. The names INSIDE the captures, not just the name on the folder.
+ *
+ * The harvest above knows the party this app went looking for. It cannot know
+ * the owner a site names on its About page or the product it sells, and on
+ * 2026-08-19 that gap cost a near miss: a scanned client's product name and
+ * two lines of their FAQ reached a tracked source comment, and both leak
+ * gates reported PASS because the term list had only ever been told the four
+ * business names. A term list cannot bite on a name nobody told it.
+ *
+ * `.scrub-ignore` is the reviewed dismissal, untracked for the same reason
+ * `.scrub-terms` is: it holds third-party names. It exists because the names
+ * here are chosen by the scanned site, not by this repo, and one real capture
+ * typed a Person node whose name was an ordinary English job word. Putting
+ * that on the term list would stop the build for every tracked file using it
+ * in its ordinary sense.
+ */
+let ignoreLines = [];
+try {
+  ignoreLines = fs.readFileSync(path.join(ROOT, '.scrub-ignore'), 'utf8').split('\n');
+} catch {
+  /* no dismissal file means nothing has been dismissed */
+}
+const capturedNames = [...new Set(dataRoots.flatMap((r) => COV.harvestCapturedNames(r)))];
+const uncovered = scrub.present ? COV.missingCoverage(scannedNames, terms, ignoreLines) : [];
+const uncoveredEntities = scrub.present
+  ? COV.missingCoverage(capturedNames, terms, ignoreLines)
+  : [];
 
 /**
  * GATE 4. A tracked binary must be allowlisted by name.
@@ -180,6 +208,18 @@ if (uncovered.length) {
   bad++;
 }
 
+if (uncoveredEntities.length) {
+  console.log(`  ${uncoveredEntities.length} name(s) INSIDE the captured pages have no ${LEAKS.SCRUB_TERMS_FILE} entry`);
+  console.log('  covering them: the owners and products the scanned sites name in their own');
+  console.log('  markup. The business name on the folder does not cover these, and a');
+  console.log('  product name reached a source comment once with every gate reporting PASS.');
+  console.log('  Add each one, or dismiss it in .scrub-ignore if it names nobody:');
+  for (const n of uncoveredEntities.slice(0, 15)) console.log(`    ${n}`);
+  if (uncoveredEntities.length > 15) console.log(`    ... and ${uncoveredEntities.length - 15} more`);
+  console.log('');
+  bad++;
+}
+
 if (unallowed.length) {
   console.log(`  ${unallowed.length} tracked file(s) are neither known text nor listed in .binary-allow.`);
   console.log('  Every leak scan here reads text, so anything else publishes unexamined,');
@@ -202,7 +242,8 @@ if (bad) {
 } else {
   console.log(
     `  ${files.length} tracked files, ${terms.length} operator term(s) checked.\n` +
-      `  Nothing under data/ is tracked. ${scannedNames.length} scanned business(es) covered by the term list.\n` +
+      `  Nothing under data/ is tracked. ${scannedNames.length} scanned business(es) and ` +
+      `${capturedNames.length} name(s) inside the captures covered by the term list.\n` +
       '  No unallowed binaries, no user paths, no key-shaped strings, no live email domains, PASS\n'
   );
 }

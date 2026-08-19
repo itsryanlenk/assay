@@ -65,16 +65,105 @@ function covered(name, terms) {
   });
 }
 
-/** The scanned names no term covers, in input order, deduped. */
-function missingCoverage(names, terms) {
+/**
+ * The scanned names no term covers, in input order, deduped.
+ *
+ * `dismissed` is the reviewed-and-not-identifying list, and it exists because
+ * the harvest below reads names a scanned site chose, not names this repo
+ * chose. A real capture typed a Person node whose name was an ordinary
+ * English job word. Demanding a scrub term for that would put that word on
+ * the term list, and the term scan would then stop the build for every
+ * tracked file using it in its ordinary sense. A reviewed dismissal is a
+ * deliberate act with no blast radius; a dangerous term is neither. Comments
+ * and blanks are ignored, same convention as .binary-allow.
+ */
+function missingCoverage(names, terms, dismissed) {
+  const waived = new Set(
+    (dismissed || [])
+      .map((l) => String(l).trim())
+      .filter((l) => l !== '' && !l.startsWith('#'))
+      .map((l) => l.toLowerCase())
+  );
   const out = [];
   const seen = new Set();
   for (const n of names) {
     const key = String(n).toLowerCase();
     if (seen.has(key)) continue;
     seen.add(key);
+    if (waived.has(key)) continue;
     if (!covered(n, terms)) out.push(n);
   }
+  return out;
+}
+
+/**
+ * IDENTIFYING node types. Narrow on purpose.
+ *
+ * The harvest has to catch the human and the product and stop there. A
+ * FAQPage Question carries page copy in `name`, a BreadcrumbList ListItem
+ * carries "Blog", and an ItemList carries whatever the site felt like: making
+ * the operator add a scrub term per FAQ question would retire the gate within
+ * a week. These are the types whose `name` is a party rather than a phrase.
+ */
+const IDENTIFYING_TYPES = new Set([
+  'organization', 'person', 'product', 'softwareapplication', 'brand',
+  'localbusiness', 'store', 'professionalservice', 'newsletterservice',
+  'corporation', 'ngo', 'educationalorganization', 'newsmediaorganization',
+]);
+
+const isIdentifyingType = (t) =>
+  IDENTIFYING_TYPES.has(t) || t.endsWith('business') || t.endsWith('store');
+
+/**
+ * Every identifying entity name one captured document names, at any depth.
+ *
+ * The business-name harvest above reads folder slugs and ledger rows, so it
+ * only ever knows the party this app went looking for. It cannot know the
+ * owner the site names on its About page or the product it sells, and on
+ * 2026-08-19 that gap let a scanned client's product name and two lines of
+ * their FAQ sit in a tracked source comment with both leak gates reporting
+ * PASS. schema.org hangs exactly those names one key down, at `author`,
+ * `founder` and `brand`, so this walks rather than reading the top of a
+ * graph. Malformed JSON-LD yields nothing, the way a parser sees it.
+ */
+function entityNamesIn(text) {
+  const out = [];
+  const push = (v) => {
+    const s = typeof v === 'string' ? v.trim() : '';
+    if (s !== '' && !out.includes(s)) out.push(s);
+  };
+
+  const walk = (v, depth, seen) => {
+    if (!v || typeof v !== 'object' || depth > 8 || seen.has(v)) return;
+    seen.add(v);
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x, depth + 1, seen);
+      return;
+    }
+    const t = v['@type'];
+    const types = (Array.isArray(t) ? t : [t])
+      .filter((x) => typeof x === 'string')
+      .map((x) => x.toLowerCase());
+    if (types.some(isIdentifyingType)) push(v.name);
+    for (const x of Object.values(v)) walk(x, depth + 1, seen);
+  };
+
+  const re = /<script\b[^>]*type\s*=\s*["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  for (const m of String(text).matchAll(re)) {
+    try {
+      walk(JSON.parse((m[1] || '').trim()), 0, new Set());
+    } catch {
+      /* malformed JSON-LD names nobody, which is what a parser sees */
+    }
+  }
+
+  // og:site_name is the other place a site states who it is, and it survives
+  // on pages that carry no JSON-LD at all.
+  const og = String(text).match(
+    /<meta\b[^>]*property\s*=\s*["']og:site_name["'][^>]*content\s*=\s*["']([^"']+)["']/i
+  );
+  if (og) push(og[1]);
+
   return out;
 }
 
@@ -145,11 +234,61 @@ function nonTextFiles(trackedFiles, allowLines) {
   });
 }
 
+/**
+ * Every identifying name the captured documents under a data root state.
+ *
+ * Reads the text files a scan wrote. Size-capped per file and unreadable
+ * files skipped, because this runs on every preflight and a gate that makes
+ * the build slow is a gate somebody turns off.
+ */
+const MAX_HARVEST_BYTES = 4 * 1024 * 1024;
+
+function harvestCapturedNames(dataRoot) {
+  const out = [];
+  const seen = new Set();
+  const add = (n) => {
+    const key = n.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(n);
+  };
+
+  const walkDir = (dir, depth) => {
+    if (depth > 8) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        walkDir(p, depth + 1);
+        continue;
+      }
+      if (!/\.(html?|txt|json|md)$/i.test(e.name)) continue;
+      try {
+        if (fs.statSync(p).size > MAX_HARVEST_BYTES) continue;
+        for (const n of entityNamesIn(fs.readFileSync(p, 'utf8'))) add(n);
+      } catch {
+        /* an unreadable capture names nobody */
+      }
+    }
+  };
+
+  for (const sub of ['captures', 'clients']) walkDir(path.join(dataRoot, sub), 0);
+  return out;
+}
+
 module.exports = {
   MIN_TERM_LEN,
+  IDENTIFYING_TYPES,
   nameFromSlug,
   covered,
   missingCoverage,
   harvestScannedNames,
+  entityNamesIn,
+  harvestCapturedNames,
   nonTextFiles,
 };

@@ -61,6 +61,13 @@
 # publishing the repo published the list it existed to protect.
 /.scrub-terms
 
+# The reviewed dismissals for the captured-name gate: names harvested out of
+# scanned pages that the operator has looked at and judged to identify nobody.
+# Untracked for the same reason as the list above, and for one more: every
+# line here is a name no leak scan will look for again, so it is the operator's
+# own reviewed act and travels with nothing.
+/.scrub-ignore
+
 # INTERNAL WORKING DOCUMENTS. These stay on the operator's machine.
 #
 # Handoffs, audits, the build plan and the progress log describe how this
