@@ -582,6 +582,113 @@ async function crawlerRunFrom(html) {
     ok('a truncated capture yields no verdict about page content',
       web.status === 'unverified', `${web.status}: ${web.detail}`);
 
+
+    /**
+     * A TEXT FILE IS NOT A PAGE, AND A SITEMAP IS NOT DISCARDED FOR A `www.`
+     *
+     * Rule 3 says the site-wide items print a number only when the capture
+     * earned one, and "more than one page was read" is how that is decided.
+     * A shipped packet scored a whole site off ONE real page because the
+     * second "page" was the site's own llms.txt, and the chain that put it
+     * there has three separate links, each reproduced below against the
+     * shape the real capture had:
+     *
+     *   1. The sitemap listed the apex host while the scan ran on the `www.`
+     *      host, so every <loc> was dropped as off-site and a perfectly good
+     *      sitemap yielded nothing.
+     *   2. Discovery fell back to homepage links, whose filter excluded
+     *      assets by extension and had never heard of `.txt`.
+     *   3. Nothing downstream asked whether a capture was a page, so the
+     *      text file counted toward the coverage gate and unlocked a
+     *      site-wide verdict the capture had not earned.
+     */
+    {
+      const A = require(path.join(ROOT, 'dist/main/main/checks/ai-readiness.js'));
+      const WWW = 'https://www.pagecount.test';
+      const cand = { ...candidate, name: 'Pagecount Co', website: WWW };
+
+      const cap = (url, body, ct) => ({
+        ref: {
+          id: url, url, requestedUrl: url, source: 'crawler', method: 'GET',
+          httpStatus: body === null ? 404 : 200, contentType: ct,
+          fetchedAt: new Date().toISOString(), sha256: 'c'.repeat(64),
+          byteLength: (body || '').length, storedPath: '(test)',
+        },
+        body: body || '', captured: true,
+      });
+
+      const ROBOTS_OPEN = 'User-agent: *\nAllow: /\n';
+      const HOME = `<html><head><title>Pagecount Co</title>
+        <link rel="stylesheet" href="/assets/app.css">
+        <a href="/llms.txt">llms.txt</a>
+        <a href="https://www.pagecount.test/">home</a>
+        </head><body><p>${'Real reading material here. '.repeat(30)}</p></body></html>`;
+      const LLMS = `# Pagecount Co\n\n## Pages\n\n- ${WWW}/ : the homepage\n${'- note\n'.repeat(20)}`;
+
+      // The exact shape: the sitemap names the APEX host, the scan runs on www.
+      const APEX_SITEMAP =
+        '<?xml version="1.0"?><urlset><url><loc>https://pagecount.test/</loc></url></urlset>';
+
+      const serve = (sitemapBody) => async (url) => {
+        const u = url.replace(/\/+$/, '');
+        if (u === WWW) return cap(`${WWW}/`, HOME, 'text/html');
+        if (u.endsWith('/robots.txt')) return cap(url, 'User-agent: *\nAllow: /\n', 'text/plain');
+        if (u.endsWith('/sitemap.xml')) return cap(url, sitemapBody, 'application/xml');
+        if (u.endsWith('/llms.txt')) return cap(url, LLMS, 'text/plain');
+        return cap(url, null, null);
+      };
+
+      const noteOf = (f) => {
+        const item = (f.score ? f.score.items : []).find((i) => /Read across/.test(i.note || ''));
+        return item ? item.note : (f.unverifiedNote || '');
+      };
+
+      const apex = await A.aiReadinessCheck.run(ctxWith(cand, serve(APEX_SITEMAP)));
+      ok('a text document is never counted as a page that was read',
+        !/llms\.txt/.test(noteOf(apex).replace(/plus robots[^.]*\./, '')), noteOf(apex));
+      ok('the page count is the pages, and there is one',
+        /Read across 1 page\(s\): \//.test(noteOf(apex)), noteOf(apex));
+      ok('a sitemap on the apex host is not discarded for a www. mismatch',
+        /found via sitemap/.test(apex.unverifiedNote || ''), apex.unverifiedNote || '(none)');
+
+      // The honest outcome for a one-page site whose own sitemap confirms it
+      // is one page: a number, earned by a confirmed small site, not by a
+      // text file miscounted. Both halves matter, so both are pinned.
+      ok('a one-page site confirmed by its own sitemap still gets a number',
+        apex.score && typeof apex.score.rescaled === 'number', JSON.stringify(apex.score || null));
+
+      /**
+       * And the guard that has to hold when discovery falls back anyway. With
+       * no sitemap at all the homepage links are the only way in, and the
+       * .txt link must not be picked as a page. A site with genuinely nothing
+       * but its homepage has not earned a site-wide verdict, which is Rule 3.
+       */
+      const linksOnly = await A.aiReadinessCheck.run(ctxWith(cand, serve('not a sitemap')));
+      ok('the homepage-link fallback never picks a text document as a page',
+        !/llms\.txt/.test(noteOf(linksOnly).replace(/plus robots[^.]*\./, '')), noteOf(linksOnly));
+      ok('and the fallback still counts one page, not two',
+        /Read across 1 page\(s\)/.test(noteOf(linksOnly)), noteOf(linksOnly));
+
+      /**
+       * Rule 3, which the miscount was quietly defeating. A homepage that
+       * links nowhere, with no readable sitemap, is one page and no
+       * enumeration: the site-wide items are verdicts about a whole site and
+       * this capture has not earned one. Before the fix a linked text file
+       * could satisfy the same gate on its own.
+       */
+      const BARE = `<html><head><title>Pagecount Co</title></head><body><p>${'Words on a page. '.repeat(30)}</p></body></html>`;
+      const bare = await A.aiReadinessCheck.run(ctxWith(cand, async (url) => {
+        const u = url.replace(/\/+$/, '');
+        if (u === WWW) return cap(`${WWW}/`, BARE, 'text/html');
+        if (u.endsWith('/robots.txt')) return cap(url, ROBOTS_OPEN, 'text/plain');
+        return cap(url, null, null);
+      }));
+      const bareEntity = (bare.score ? bare.score.items : []).find((i) => i.id === 'entity-schema');
+      ok('one page and no enumeration still refuses the site-wide number',
+        bare.status === 'unverified' || (bareEntity && bareEntity.unknown === true),
+        `${bare.status} / ${JSON.stringify(bareEntity || null)}`);
+    }
+
     // 8d. A capture that arrived intact and then failed to WRITE. fetch-raw
     // recorded that in transportError and left httpStatus 200 and a full body
     // on the ref, so two things went wrong at once: website.ts reads any

@@ -65,10 +65,23 @@ packet workflow, hardened and audited, but not yet tagged.
 
 ### Fixed
 
+- A site-wide score printed off one real page, with a scanned site's own
+  llms.txt standing in as the second. Three links in one chain. A sitemap that
+  writes its URLs on the apex host was discarded whole when the scan ran on the
+  `www.` host, so a valid sitemap yielded nothing; sibling hosts are now accepted and
+  rewritten onto the host being scanned, which keeps one page from being read
+  twice under two names. Discovery then fell back to homepage links, whose
+  filter named the extensions it refused and had never heard of `.txt`; it
+  enumerates what a page looks like now, so an unfamiliar file type is refused
+  instead of admitted. And nothing downstream asked whether a capture was a
+  page at all, so a text file counted toward the gate deciding whether a
+  site-wide item may print a number. That gate is the instrument's rule about
+  never printing a number the capture did not earn, and a linked text file
+  could satisfy it alone.
 - The leak gates only knew the name on the folder. Preflight demanded a
-  `.scrub-terms` entry per scanned business and stopped there, so the owners,
-  the people and products a scanned site names in its own markup were invisible to
-  every scan in the repo: a term list cannot bite on a name nobody told it.
+  `.scrub-terms` entry per scanned business and stopped there, so the people
+  and products a scanned site names in its own markup were invisible to every
+  scan in the repo: a term list cannot bite on a name nobody told it.
   A scanned product name and two lines of a scanned FAQ reached a source
   comment once with both gates reporting PASS. Preflight now harvests
   identifying entity names out of the captured pages themselves, at any depth,
