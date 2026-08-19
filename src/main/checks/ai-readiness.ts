@@ -215,6 +215,37 @@ function deepNodes(nodes: Node[], maxDepth = 8): Node[] {
 
 const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/** Extensions a page is served under. Anything else is a document, not a page. */
+const PAGE_EXT = new Set(['html', 'htm', 'shtml', 'xhtml', 'php', 'asp', 'aspx', 'jsp', 'cfm']);
+
+/**
+ * Is this URL a page, as opposed to a file the site happens to publish?
+ *
+ * ENUMERATES THE FRIENDLY SET, and the reason is a shipped defect. The link
+ * picker used to exclude assets by listing extensions it knew about, and it
+ * had never heard of `.txt`, so a homepage linking to its own llms.txt had
+ * that file picked as a page. It then counted toward "more than one page was
+ * read", which is the gate deciding whether a site-wide item may print a
+ * number at all, and a site with one real page got a whole-site verdict.
+ * A deny list fails open on the extension nobody thought of, the same way
+ * the tracked-binary check failed open on .heic; this one fails closed.
+ *
+ * No extension is the common case for a page and stays allowed. Only a short
+ * alphanumeric tail counts as an extension, so `/2024.1-release-notes` is a
+ * page rather than a file with a nonsense type.
+ */
+export function isPageUrl(raw: string): boolean {
+  let pathname: string;
+  try {
+    pathname = new URL(raw).pathname;
+  } catch {
+    pathname = String(raw).split(/[?#]/)[0] ?? '';
+  }
+  const last = pathname.split('/').filter(Boolean).pop() ?? '';
+  const m = last.match(/\.([a-z0-9]{1,5})$/i);
+  return !m || PAGE_EXT.has(m[1]!.toLowerCase());
+}
+
 const NAMED_ENTITIES: Record<string, string> = {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
 };
@@ -1019,10 +1050,49 @@ export const aiReadinessCheck: FlawCheck = {
      * small, capped set of the pages most likely to carry them, chosen from
      * the site's own sitemap so we are not guessing at URLs.
      */
+    /**
+     * `www.` IS NOT ANOTHER SITE, AND DROPPING IT THREW A SITEMAP AWAY.
+     *
+     * `startsWith(origin)` on a scan of https://www.example.com discards
+     * every <loc> a sitemap writes as https://example.com, which is most of
+     * them: a site declares one canonical host and is reached on the other
+     * all day. A delivered packet hit exactly that, so a valid one-URL
+     * sitemap yielded nothing, discovery fell through to homepage links, and
+     * the site was reported as enumerated by a path it should never have
+     * needed.
+     *
+     * The sibling host is accepted and REWRITTEN onto the origin this scan is
+     * actually on, so everything downstream keeps working in one host: the
+     * page dedupe key stays honest, the homepage is recognised as the
+     * homepage instead of being fetched twice under two names, and
+     * `servedAsRequested` is not asked to explain a redirect we caused. The
+     * pair is exact, www against apex and nothing else, because a prefix test
+     * here is how `https://example.com.attacker.test/` gets read as the
+     * business's own page.
+     */
+    const siblingHosts = new Set<string>();
+    try {
+      const h = new URL(origin).hostname.toLowerCase();
+      siblingHosts.add(h);
+      siblingHosts.add(h.startsWith('www.') ? h.slice(4) : `www.${h}`);
+    } catch {
+      /* an unparseable origin matches nothing, which is the safe direction */
+    }
+    const onThisSite = (raw: string): string | null => {
+      try {
+        const u = new URL(raw);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+        if (!siblingHosts.has(u.hostname.toLowerCase())) return null;
+        return `${origin}${u.pathname}${u.search}`;
+      } catch {
+        return null;
+      }
+    };
+
     const locsIn = (xml: string): string[] =>
       [...xml.matchAll(/<loc>\s*([^<]+?)\s*<\/loc>/gi)]
-        .map((m) => (m[1] ?? '').trim())
-        .filter((u) => u.startsWith(origin));
+        .map((m) => onThisSite((m[1] ?? '').trim()))
+        .filter((u): u is string => u !== null);
 
     /**
      * Follow ONE level of sitemap index.
@@ -1117,7 +1187,7 @@ export const aiReadinessCheck: FlawCheck = {
         .filter(
           (u) =>
             u !== '' &&
-            !/\.(css|js|png|jpe?g|gif|svg|webp|ico|woff2?|ttf|pdf|zip|mp4)(\?|$)/i.test(u) &&
+            isPageUrl(u) &&
             !/\/wp-(content|includes|json|admin)\//i.test(u) &&
             !/\/(feed|comments)\/?$/i.test(u)
         );
@@ -1205,10 +1275,32 @@ export const aiReadinessCheck: FlawCheck = {
       }
     };
 
+    /**
+     * THE LAST GUARD ON WHAT COUNTS AS A PAGE, and it is deliberately here
+     * rather than only at discovery.
+     *
+     * `readable.length > 1` is one half of the test deciding whether a
+     * site-wide item may print a number, so anything that slips into this map
+     * can unlock a whole-site verdict. A shipped packet scored a site off one
+     * real page because the other capture was the site's own llms.txt. The
+     * picker that let it through is fixed above; this refuses it whatever
+     * hands it over, including a future discovery route nobody has written
+     * yet. The homepage is never filtered: it is the document this check is
+     * anchored to, and a site serving it as something other than HTML is the
+     * website check's finding to make, not this one's.
+     */
+    const isPageCapture = (c: typeof home): boolean => {
+      const ct = c.ref.contentType ?? '';
+      if (ct !== '') return /html|xhtml/i.test(ct);
+      // No content type stated: judge the bytes, the way a parser would.
+      return /<html\b|<!doctype\s+html|<body\b/i.test(c.body.slice(0, 2000));
+    };
+
     const byFinalUrl = new Map<string, (typeof home)>();
     byFinalUrl.set(pageKey(home.ref.url), home);
     for (const c of extras) {
       if (!servedAsRequested(c.ref) || c.body.trim() === '') continue;
+      if (!isPageCapture(c)) continue;
       const key = pageKey(c.ref.url);
       if (!byFinalUrl.has(key)) byFinalUrl.set(key, c);
     }

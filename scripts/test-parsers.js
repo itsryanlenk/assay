@@ -478,6 +478,32 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
       /Review or AggregateRating markup found/.test(rated.note), true);
   }
 
+
+  /**
+   * What counts as a page. The discovery filter used to name the extensions
+   * it refused, so it had never heard of `.txt` and picked a site's own
+   * llms.txt as a page to score. This enumerates the friendly set instead,
+   * the same shape the tracked-binary check had to be rewritten into after a
+   * deny list failed open on .heic.
+   */
+  eq('a bare path is a page', A.isPageUrl('https://x.test/about'), true);
+  eq('a trailing slash is a page', A.isPageUrl('https://x.test/services/'), true);
+  eq('the root is a page', A.isPageUrl('https://x.test/'), true);
+  eq('an .html file is a page', A.isPageUrl('https://x.test/index.html'), true);
+  eq('a .php file is a page', A.isPageUrl('https://x.test/contact.php'), true);
+  eq('llms.txt is not a page', A.isPageUrl('https://x.test/llms.txt'), false);
+  eq('a sitemap is not a page', A.isPageUrl('https://x.test/sitemap.xml'), false);
+  eq('a feed is not a page', A.isPageUrl('https://x.test/feed.json'), false);
+  eq('a PDF is not a page', A.isPageUrl('https://x.test/brochure.pdf'), false);
+  eq('a stylesheet is not a page', A.isPageUrl('https://x.test/assets/app.css'), false);
+  // A dot in a slug is not an extension, and treating it as one would drop
+  // real pages: the filter has to be tight about what a tail looks like.
+  eq('a version number in a slug is still a page',
+    A.isPageUrl('https://x.test/blog/2024.1-release-notes'), true);
+  eq('a query string does not make a page a file',
+    A.isPageUrl('https://x.test/search?q=a.txt'), true);
+  eq('an unparseable string falls back to the same rule', A.isPageUrl('/notes.txt'), false);
+
   // Taxonomy and archive URLs a sitemap lists but an llms.txt should not, so
   // they never count as missing coverage.
   eq('a category archive is a taxonomy path', A.isTaxonomyArchivePath('/category/uncategorized/'), true);
