@@ -65,6 +65,18 @@ packet workflow, hardened and audited, but not yet tagged.
 
 ### Fixed
 
+- The leak gates only knew the name on the folder. Preflight demanded a
+  `.scrub-terms` entry per scanned business and stopped there, so the owners,
+  the people and products a scanned site names in its own markup were invisible to
+  every scan in the repo: a term list cannot bite on a name nobody told it.
+  A scanned product name and two lines of a scanned FAQ reached a source
+  comment once with both gates reporting PASS. Preflight now harvests
+  identifying entity names out of the captured pages themselves, at any depth,
+  because schema.org hangs the owner at `founder` and the product at `brand`.
+  Question and breadcrumb text is left alone, so the gate asks about parties
+  and never about page copy. A name that identifies nobody is dismissed in
+  `.scrub-ignore`, untracked and reviewed one line at a time, so no ordinary
+  English word ever has to go on the term list to clear the build.
 - Four ways the entity item denied a Person node its own captures carried.
   A client packet reported "no human Person node" on all four properties in
   it, seven days after the first fix for that sentence shipped, and each
@@ -100,7 +112,6 @@ packet workflow, hardened and audited, but not yet tagged.
   server response the crawler received; on one packet the two files differed
   by a trailing newline. The manifest now says what each source is and that
   neither is a capture of the page after its JavaScript ran.
-
 - A placeholder marker only counts on a page thin enough to be a
   placeholder. "Coming soon" inside one of a news homepage's article
   headlines made the website check call a 342-kilobyte content site "a

@@ -1865,6 +1865,71 @@ async function bookingContactHopEndToEnd() {
     SC.missingCoverage(['Example Boutique', 'Dockside Grill'], ['boutique']),
     ['Dockside Grill']);
 
+
+  /**
+   * A BUSINESS NAME IS NOT THE ONLY NAME A SCAN CAPTURES.
+   *
+   * The gate above asks the term list about the business. It never asked
+   * about the people and products named INSIDE the captured markup, and on
+   * 2026-08-19 that gap let a scanned client's product name and two lines of
+   * their FAQ reach a tracked source comment while both leak gates reported
+   * PASS. The term list cannot bite on a name it has never been told, and
+   * nothing was telling it these. Harvesting them is what makes the existing
+   * term scan able to see them at all.
+   */
+  const LD = (obj) =>
+    `<html><head><script type="application/ld+json">${JSON.stringify(obj)}</script></head><body></body></html>`;
+
+  eq('an Organization name is harvested',
+    SC.entityNamesIn(LD({ '@type': 'Organization', name: 'Dockside Grill' })), ['Dockside Grill']);
+  // The exact shape that leaked: the human and the product, one key down from
+  // a node type the old harvest never looked at.
+  eq('a Person nested at author is harvested',
+    SC.entityNamesIn(LD({
+      '@type': 'SoftwareApplication', name: 'Sample App',
+      author: { '@type': 'Person', name: 'Lee Sample' },
+    })), ['Sample App', 'Lee Sample']);
+  eq('a Person nested at founder is harvested',
+    SC.entityNamesIn(LD({
+      '@type': 'Organization', name: 'Sample Tools',
+      founder: { '@type': 'Person', name: 'Lee Sample' },
+    })), ['Sample Tools', 'Lee Sample']);
+  eq('a @graph is walked like any other container',
+    SC.entityNamesIn(LD({ '@graph': [
+      { '@type': 'WebSite', name: 'Not identifying on its own' },
+      { '@type': 'Person', name: 'Lee Sample' },
+    ] })), ['Lee Sample']);
+  eq('og:site_name is harvested too',
+    SC.entityNamesIn('<meta property="og:site_name" content="Dockside Grill">'), ['Dockside Grill']);
+  // Question and answer text is page copy, not an entity name. Harvesting it
+  // would demand a scrub term per FAQ question and make the gate unusable.
+  eq('FAQ question text is not an entity name',
+    SC.entityNamesIn(LD({ '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'Do you deliver?' }] })), []);
+  eq('a breadcrumb label is not an entity name',
+    SC.entityNamesIn(LD({ '@type': 'BreadcrumbList', itemListElement: [{ '@type': 'ListItem', name: 'Blog' }] })), []);
+  eq('malformed JSON-LD yields nothing and never throws',
+    SC.entityNamesIn('<script type="application/ld+json">{ not json</script>'), []);
+  eq('a document with no markup yields nothing', SC.entityNamesIn('<html><body>hi</body></html>'), []);
+
+  /**
+   * The escape hatch, and why it has to exist. A real capture named a Person
+   * with an ordinary English job word. Demanding a scrub term for that would
+   * put that word on the list, and the term scan would then fail the build
+   * for every tracked file using it in its ordinary sense. A reviewed
+   * dismissal is the deliberate act; a dangerous term is not.
+   */
+  eq('a reviewed name is dismissed from the coverage demand',
+    SC.missingCoverage(['Dockside Grill', 'Crew'], ['dockside'], ['Crew']), []);
+  eq('dismissal is case-insensitive',
+    SC.missingCoverage(['Crew'], [], ['crew']), []);
+  eq('comments and blanks in the dismissal list are ignored',
+    SC.missingCoverage(['Crew'], [], ['# reviewed', '', 'Crew']), []);
+  eq('a name nobody dismissed is still demanded',
+    SC.missingCoverage(['Dockside Grill'], [], ['Crew']), ['Dockside Grill']);
+  // The dismissal list must never be able to wave through a real business.
+  eq('dismissal does not change the business-name gate when it is empty',
+    SC.missingCoverage(['Dockside Grill'], []), ['Dockside Grill']);
+
   eq('an unallowed tracked binary is named',
     SC.nonTextFiles(['assets/icon.png', 'src/main/main.ts', 'docs/shot.PNG'], ['assets/icon.png']),
     ['docs/shot.PNG']);
