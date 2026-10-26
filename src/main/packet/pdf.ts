@@ -186,6 +186,8 @@ export async function htmlToPdf(
     },
   });
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  // The page is loaded once and printed. Nothing in it should move it anywhere.
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
 
   // Every outbound wait in this app is bounded (fetch-raw aborts, the CLI kills
   // on a timer). A render is no different: if the load stalls or the embedded
@@ -212,7 +214,7 @@ export async function htmlToPdf(
         preferCSSPageSize: true,
         pageSize: 'Letter',
         landscape: false,
-        margins: { marginType: 'custom', top: 0, bottom: 0, left: 0, right: 0 },
+        margins: { top: 0, bottom: 0, left: 0, right: 0 },
       });
     })();
     // If the deadline wins, render still settles later against a window the

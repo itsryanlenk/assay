@@ -37,7 +37,7 @@
  * something the operator's own eyes settle in one glance at view-source.
  */
 
-import { allowedFactsFrom, Renderer } from '../generate';
+import { allowedFactsFrom, mdEscape, Renderer } from '../generate';
 import { Candidate, FlawFinding } from '../../../shared/types';
 import { stemTerms } from '../../checks/ai-readiness';
 
@@ -96,6 +96,24 @@ function allMeasured(s: string, measured: Set<string>): boolean {
  *  are the two fields the allowed-numbers set is built FROM. */
 function safeText(candidateText: string, fallback: string, measured: Set<string>): string {
   return allMeasured(candidateText, measured) ? candidateText : fallback;
+}
+
+/**
+ * JSON the reader is told to paste inside `<script type="application/ld+json">`.
+ * JSON.stringify leaves `<`, `>` and `&` alone, so a listing value carrying
+ * `</script>` would close that tag on the reader's own site. The \u escapes
+ * are still the same JSON to every parser.
+ */
+function jsonForScript(value: unknown): string {
+  return JSON.stringify(value, null, 2)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026');
+}
+
+/** For text inside an HTML tag or a double-quoted attribute the reader pastes. */
+function htmlEscape(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function findByCheck(findings: FlawFinding[], id: FlawFinding['checkId']): FlawFinding | undefined {
@@ -341,31 +359,36 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   const categoryLabel = categoryWords.length ? titleCase(categoryWords) : null;
   const town = addr.addressLocality;
 
+  // Places controls the name; anyone can suggest an edit to a listing. Every
+  // prose mention goes through mdEscape so it cannot become a link, an image
+  // or raw HTML in a document the operator sends.
+  const mdName = mdEscape(candidate.name);
+
   const lines: string[] = [];
 
-  lines.push(`# ${candidate.name} Schema Starter Kit`);
+  lines.push(`# ${mdName} Schema Starter Kit`);
   lines.push('');
-  lines.push(`**Prepared for ${candidate.name} · ${formatDate(date)} · Companion to the AI Readiness Scan**`);
+  lines.push(`**Prepared for ${mdName} · ${formatDate(date)} · Companion to the AI Readiness Scan**`);
   lines.push('');
 
   if (!origin) {
     lines.push(
-      `No website is on file for ${candidate.name}. Everything below is still correct schema, but there is ` +
+      `No website is on file for ${mdName}. Everything below is still correct schema, but there is ` +
         'nowhere on the open web to paste it until a site exists. Keep this ready for when one does.'
     );
     lines.push('');
   }
 
   lines.push(
-    `This kit is copy-paste markup, built only from what is already on ${candidate.name}'s own pages and its ` +
+    `This kit is copy-paste markup, built only from what is already on ${mdName}'s own pages and its ` +
       `\. Every block below says where its facts came from. Anything not confirmed ` +
-      `on ${candidate.name}'s own pages is flagged as needing your confirmation before you paste it, rather than ` +
+      `on ${mdName}'s own pages is flagged as needing your confirmation before you paste it, rather than ` +
       'stated as settled.'
   );
   lines.push('');
   lines.push(
     'One rule sits above the rest: do not add `aggregateRating` or `Review` markup about ' +
-      `${candidate.name} to any of this` +
+      `${mdName} to any of this` +
       (prov.hasListing ? ', even though the listing hands over a rating and a review count' : '') +
       '. Self-authored review markup does not qualify for rich results, and ' +
       'it is the schema type most likely to draw a manual action. None of the blocks below include it, and none ' +
@@ -435,7 +458,7 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   lines.push('- `founder`: see section 2.');
   lines.push('');
   lines.push('```json');
-  lines.push(JSON.stringify({ '@context': 'https://schema.org', '@graph': graph }, null, 2));
+  lines.push(jsonForScript({ '@context': 'https://schema.org', '@graph': graph }));
   lines.push('```');
   lines.push('');
 
@@ -456,13 +479,13 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   const personFound = Boolean(entityItem && /founder Person|Person node is present/.test(entityItem.note));
   if (personFound) {
     lines.push(
-      `Already on the page. This scan found a Person node in ${candidate.name}'s own markup, so nothing here ` +
+      `Already on the page. This scan found a Person node in ${mdName}'s own markup, so nothing here ` +
         'needs writing from scratch. What the entity item looks for beside it is a `founder` property on the ' +
         'organization node pointing at that Person by `@id`, which is what ties the human to the business:'
     );
   } else {
     lines.push(
-      `Not included. Nothing in this scan's evidence names an owner or founder anywhere on ${candidate.name}'s own ` +
+      `Not included. Nothing in this scan's evidence names an owner or founder anywhere on ${mdName}'s own ` +
         'pages, and a fact needs an origin before it gets published here (Law 1 of this kit). If you want a founder ' +
         'property on the organization node, add a Person node once you have a name confirmed on your own About or ' +
         'Team page, give it a stable `@id`, and point to it like this:'
@@ -487,10 +510,12 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   // --- Section 3 ------------------------------------------------------
   // A visible placeholder rather than a silent omission: the sentence above
   // promises a category, so the example has to show where it belongs.
-  const categoryPart = categoryLabel ? ` | ${categoryLabel}` : ' | [what you do, in a customer\'s words]';
-  const townPart = town ? ` | ${town}` : '';
-  const categoryDescPart = categoryLabel ? `, ${categoryLabel.toLowerCase()}` : '';
-  const townServingPart = town ? `, serving ${town}` : '';
+  // The town is parsed out of the Places address, so it is escaped for the
+  // pasted markup exactly as the name is below.
+  const categoryPart = categoryLabel ? ` | ${htmlEscape(categoryLabel)}` : ' | [what you do, in a customer\'s words]';
+  const townPart = town ? ` | ${htmlEscape(town)}` : '';
+  const categoryDescPart = categoryLabel ? `, ${htmlEscape(categoryLabel.toLowerCase())}` : '';
+  const townServingPart = town ? `, serving ${htmlEscape(town)}` : '';
 
   lines.push('## 3. Title tag and meta description');
   lines.push('');
@@ -530,11 +555,7 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   // bracket ("Bob's <Best> Diner") would break the tag the recipient pastes, so
   // escape it for the markup context even though this kit goes to the business
   // about its own site.
-  const nameForHtml = candidate.name
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+  const nameForHtml = htmlEscape(candidate.name);
   lines.push(`<title>${nameForHtml}${categoryPart}${townPart}</title>`);
   lines.push('```');
   lines.push('');
@@ -559,7 +580,7 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
   lines.push(
     'Content first, markup second: only mark up a question whose answer already exists as visible text on the ' +
       `page. Hidden FAQ schema for a question nobody can read is a penalty risk, not a shortcut, so resist the urge ` +
-      `to seed this with questions ${candidate.name} has not actually published.`
+      `to seed this with questions ${mdName} has not actually published.`
   );
   lines.push('');
   lines.push(
@@ -663,8 +684,13 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
    * capture already holds the URL that was really read, so use that and say
    * nothing when there is none.
    */
+  // The URL came out of the site's own robots.txt, and URL serialisation
+  // leaves backticks, pipes and brackets in a query string alone. One that
+  // could close the code span it is printed in is not declared at all.
   const sitemapUrl =
-    crawlFinding?.evidence?.map((e) => e.url).find((u) => /sitemap[^/]*\.xml(\?|$)/i.test(u)) ?? null;
+    crawlFinding?.evidence
+      ?.map((e) => e.url)
+      .find((u) => /sitemap[^/]*\.xml(\?|$)/i.test(u) && !/[`|<>[\]\s]/.test(u)) ?? null;
 
   if (robotsPasses) {
     lines.push(
@@ -716,7 +742,9 @@ export const schemaKitRenderer: Renderer = ({ candidate, findings, score, date, 
     );
     lines.push('');
     lines.push('```');
-    lines.push(`# ${candidate.name}`);
+    // Inside a fence nothing renders, but a line break in the name could
+    // still end the fence early.
+    lines.push(`# ${candidate.name.replace(/\s+/g, ' ')}`);
     lines.push('');
     lines.push(`${categoryLabel ? categoryLabel : 'Local business'}${town ? `, ${town}` : ''}.`);
     lines.push('');

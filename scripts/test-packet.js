@@ -11,6 +11,7 @@
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const crypto = require('node:crypto');
 
 const ROOT = path.resolve(__dirname, '..');
 const G = require(path.join(ROOT, 'dist/main/main/packet/generate.js'));
@@ -50,7 +51,22 @@ const confirmedFinding = {
 const remoteFinding = { ...confirmedFinding, confirmation: 'remote' };
 
 const operator = { name: 'Operator', email: 'hello@example.test', scannerUrl: 'https://example.test/scan' };
-const base = { candidate, outputRoot: OUT, operator };
+
+/**
+ * Captures live under the app's evidence root, named and hashed the way
+ * fetch-raw and storePaste write them. Generation copies only files that are
+ * inside that root and still hash to what the finding cites.
+ */
+const EVROOT = path.join(os.tmpdir(), `packet-evroot-${process.pid}`);
+function cap(text) {
+  const sha256 = crypto.createHash('sha256').update(text).digest('hex');
+  const storedPath = path.join(EVROOT, 'scan-1', `${sha256.slice(0, 16)}.html`);
+  fs.mkdirSync(path.dirname(storedPath), { recursive: true });
+  fs.writeFileSync(storedPath, text);
+  return { storedPath, sha256 };
+}
+
+const base = { candidate, outputRoot: OUT, operator, evidenceRoot: EVROOT };
 
 /** A minimal renderer, so the walls are tested independent of real artifacts. */
 const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
@@ -137,12 +153,10 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
    * else without the app, the cache, or an explanation.
    */
   {
-    const CAP = path.join(os.tmpdir(), `cap-${process.pid}.html`);
-    fs.writeFileSync(CAP, '<html>the bytes that were read</html>');
     const OUTE = path.join(os.tmpdir(), `packet-ev-${process.pid}`);
     const stored = {
-      ...evidence[0], id: 'e-stored', storedPath: CAP,
-      sha256: 'c'.repeat(64), url: 'https://example-boutique.test/about',
+      ...evidence[0], id: 'e-stored', ...cap('<html>the bytes that were read</html>'),
+      url: 'https://example-boutique.test/about',
     };
     const withStored = { ...confirmedFinding, evidence: [stored] };
     const r2 = await G.generatePacket(
@@ -160,7 +174,42 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
 
     const manifest = fs.readFileSync(path.join(evDir, '00-CAPTURES.md'), 'utf8');
     ok('a manifest ties each file back to its URL', manifest.includes('https://example-boutique.test/about'), manifest);
-    ok('and to the hash the packet cites', manifest.includes('c'.repeat(12)), manifest);
+    ok('and to the hash the packet cites', manifest.includes(stored.sha256.slice(0, 12)), manifest);
+
+    /**
+     * 01-evidence goes to the prospect, and `storedPath` arrives over IPC from
+     * the renderer. Copying whatever path a finding names would let a bad
+     * payload put config.json (the Places key) or any file the operator can
+     * read into the client folder. Only files inside the evidence root are
+     * copied, and only while their bytes still hash to the cited sha256.
+     */
+    const SECRET = path.join(os.tmpdir(), `not-evidence-${process.pid}.json`);
+    fs.writeFileSync(SECRET, '{"placesApiKey":"secret-outside-the-evidence-root"}');
+    const secretSha = crypto.createHash('sha256').update(fs.readFileSync(SECRET)).digest('hex');
+    const OUTX = path.join(os.tmpdir(), `packet-ev-x-${process.pid}`);
+    const rx = await G.generatePacket(
+      { ...base, outputRoot: OUTX, confirmedAt: fresh, findings: [{ ...confirmedFinding, evidence: [
+        { ...evidence[0], id: 'e-out', storedPath: SECRET, sha256: secretSha },
+        { ...evidence[0], id: 'e-climb', sha256: secretSha.replace(/^./, '0'),
+          storedPath: path.join(EVROOT, 'scan-1', '..', '..', path.basename(SECRET)) },
+      ] }] },
+      [plain('A clean artifact.')]
+    );
+    const evX = path.join(OUTX, 'clients', rx.slug, '01-evidence');
+    ok('a stored path outside the evidence root is never copied into the packet',
+      fs.readdirSync(evX).every((f) => !fs.readFileSync(path.join(evX, f), 'utf8').includes('secret-outside')),
+      JSON.stringify(fs.readdirSync(evX)));
+    ok('and the manifest lists it as not kept',
+      (fs.readFileSync(path.join(evX, '00-CAPTURES.md'), 'utf8').match(/^\| _not kept_ \|/gm) || []).length === 2,
+      fs.readFileSync(path.join(evX, '00-CAPTURES.md'), 'utf8'));
+
+    const swapped = { ...evidence[0], id: 'e-swap', ...cap('<html>original bytes</html>') };
+    fs.writeFileSync(swapped.storedPath, '<html>bytes changed after the hash</html>');
+    ok('a capture whose bytes no longer match its hash is not kept',
+      G.renderCaptureManifest([{ ...confirmedFinding, evidence: [swapped] }], EVROOT).files.length === 0, '');
+    ok('and a capture that still matches is kept',
+      G.renderCaptureManifest([{ ...confirmedFinding, evidence: [stored] }], EVROOT).files.length === 1, '');
+    for (const d of [OUTX, SECRET]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } }
 
     /**
      * THE MANIFEST IS A CLIENT-FACING DOCUMENT AND MUST PASS LAW 2.
@@ -172,7 +221,7 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
      * in a document the client trusts because the operator sent it.
      */
     const hostile = {
-      ...evidence[0], id: 'e-hostile', storedPath: CAP, sha256: 'd'.repeat(64),
+      ...evidence[0], id: 'e-hostile', ...cap('<html>hostile</html>'),
       url: 'https://evil.test/x)+[Reset+your+password](https://phish.test/go',
     };
     const OUTH = path.join(os.tmpdir(), `packet-ev-h-${process.pid}`);
@@ -196,7 +245,7 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
     // A pipe would end the table cell early and shunt the rest into columns
     // that mean something else.
     const piped = {
-      ...evidence[0], id: 'e-pipe', storedPath: CAP, sha256: 'e'.repeat(64),
+      ...evidence[0], id: 'e-pipe', ...cap('<html>pipe</html>'),
       url: 'https://evil.test/a|200|999999|deadbeefcafe',
     };
     const OUTP = path.join(os.tmpdir(), `packet-ev-p-${process.pid}`);
@@ -213,7 +262,7 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
     // Sweeping the manifest without allowing what it measures would refuse
     // real packets at random, which is the hash-prefix bug in 9631aa8 again.
     const numeric = {
-      ...evidence[0], id: 'e-num', storedPath: CAP, sha256: 'f'.repeat(64),
+      ...evidence[0], id: 'e-num', ...cap('<html>numeric</html>'),
       url: 'https://example-boutique.test/sitemap-2024-07.xml',
     };
     let numThrew = null;
@@ -230,7 +279,7 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
     // And the sweep really does cover it: banned copy reaching the manifest
     // has to refuse, before anything is written.
     const bannedUrl = {
-      ...evidence[0], id: 'e-ban', storedPath: CAP, sha256: '9'.repeat(64),
+      ...evidence[0], id: 'e-ban', ...cap('<html>banned</html>'),
       url: 'https://example-boutique.test/seamless-robust-delve',
     };
     let banThrew = null;
@@ -252,7 +301,7 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
      * it unreachable by construction rather than by audit.
      */
     const traversal = {
-      ...evidence[0], id: 'e-trav', storedPath: CAP,
+      ...evidence[0], id: 'e-trav', storedPath: cap('<html>traversal</html>').storedPath,
       sha256: '../../../../evil', source: '../../also-evil',
       url: 'https://example-boutique.test/t',
     };
@@ -279,13 +328,14 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
     // third time; the SETUP line below now proves the list is non-empty
     // before anything is concluded from it.
     const namesFor = (ev) =>
-      G.renderCaptureManifest([{ ...confirmedFinding, evidence: [ev] }]).files.map((f) => f.name);
+      G.renderCaptureManifest([{ ...confirmedFinding, evidence: [ev] }], EVROOT).files.map((f) => f.name);
 
     // Control first: an ordinary capture IS named, so the zero below means
     // "refused" rather than "this function never names anything".
-    const goodNames = namesFor({ ...traversal, sha256: 'a'.repeat(64), source: 'crawler' });
+    const goodCap = cap('<html>an ordinary capture</html>');
+    const goodNames = namesFor({ ...traversal, ...goodCap, source: 'crawler' });
     ok('SETUP: an ordinary capture is named in the manifest',
-      goodNames.length === 1 && goodNames[0].startsWith('a'.repeat(12)),
+      goodNames.length === 1 && goodNames[0].startsWith(goodCap.sha256.slice(0, 12)),
       JSON.stringify(goodNames));
 
     const travNames = namesFor(traversal);
@@ -317,7 +367,7 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
       /not kept|not stored/i.test(man3), man3);
 
     for (const d of [OUTE, OUTU]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { /* best effort */ } }
-    try { fs.rmSync(CAP, { force: true }); } catch { /* best effort */ }
+    try { fs.rmSync(EVROOT, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 
   // --- the delivery vehicles must not contradict the scorecard -------------
@@ -771,6 +821,54 @@ const plain = (text) => () => ({ kind: 'Scorecard', ext: 'md', text });
       /Sitemap: https:\/\/example-boutique\.test\/sitemap_index\.xml/.test(sm5), sm5);
     ok('and does not invent the conventional path beside it',
       !/Sitemap:.*\/sitemap\.xml/.test(sm5), sm5);
+
+    /**
+     * The kit is a free deliverable, and the business name, the address and
+     * the sitemap URL all come from third parties: a Places listing anyone can
+     * suggest edits to, and a robots.txt the site serves. The 00-INDEX heading
+     * was neutralised against exactly this; the kit printed the same name raw
+     * in nine places, so a name carrying a Markdown link put a live link in a
+     * document the operator sends, and the JSON-LD the reader is told to paste
+     * inside a <script> tag could close that tag.
+     */
+    const hostileKit = SK.schemaKitRenderer({
+      candidate: {
+        ...candidate, primaryType: 'clothing_store',
+        name: 'Acme [Reset your password](https://evil.test/a) <img src=https://evil.test/t> </script><script>x()</script>',
+        address: '170 Harbor Rd, Rock"port<b>, ME 00000, USA',
+      },
+      findings: [
+        { ...confirmedFinding, checkId: 'ai-readiness', score: absent },
+        {
+          ...confirmedFinding, checkId: 'crawl-index', headline: 'A crawler can get in.',
+          evidence: [{ ...evidence[0], id: 'e-smx',
+            url: 'https://example-boutique.test/sitemap.xml?a=`[Click](https://evil.test/s)`' }],
+        },
+      ],
+      score: absent, date: '2026-07-31', operator,
+    }).text;
+    const prose = hostileKit.replace(/```[\s\S]*?```/g, '');
+    const fences = hostileKit.match(/```[\s\S]*?```/g) || [];
+    ok('a Places name cannot become a live link in the kit',
+      !/(^|[^\\])\]\(https:\/\/evil\.test/.test(prose), prose.slice(0, 400));
+    ok('nor raw HTML in the kit prose',
+      !/(^|[^\\])<img/.test(prose), prose.slice(0, 400));
+    ok('the name is still there to read',
+      /Reset your password/.test(prose), prose.slice(0, 400));
+    const jsonFences = fences.filter((f) => f.startsWith('```json'));
+    ok('SETUP: the kit has JSON-LD to check', jsonFences.some((f) => f.includes('@graph')), '');
+    ok('the JSON-LD cannot close the <script> tag it is pasted into',
+      jsonFences.every((f) => !/<\/?script/i.test(f) && !f.includes('<')), jsonFences.join('\n'));
+    ok('and is still valid JSON carrying the real name',
+      (() => {
+        const body = jsonFences.find((f) => f.includes('@graph')).replace(/^```json\n|\n```$/g, '');
+        try { return JSON.parse(body)['@graph'][0].name.includes('</script>'); } catch { return false; }
+      })(), '');
+    const htmlFences = fences.filter((f) => f.startsWith('```html')).join('\n');
+    ok('a town with a quote or a tag cannot break the pasted title and meta tags',
+      !/Rock"port|<b>/.test(htmlFences), htmlFences);
+    ok('a sitemap URL that could break out of its code span is not printed',
+      !hostileKit.includes('evil.test/s'), hostileKit.slice(hostileKit.indexOf('## 5.'), hostileKit.indexOf('## 6.')));
 
     /**
      * Section 3 told the reader a good title names the business, the category
