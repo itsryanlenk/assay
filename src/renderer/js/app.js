@@ -1111,6 +1111,9 @@ function renderGenerateRow(candidate, data, statusTarget) {
         candidate,
         findings: data.findings,
         confirmedAt: data.confirmedAt,
+        // Main sealed these findings at confirm time and refuses them back
+        // without it. Pass them through untouched.
+        seal: data.seal,
       });
     } catch (e) {
       res = {
@@ -1482,7 +1485,7 @@ function artifactLabel(kind) {
 function recordConfirmation(candidate, data) {
   if (!candidate || !data || !Array.isArray(data.findings)) return;
   state.confirmations = [
-    { candidateName: candidate.name, findings: data.findings, confirmedAt: data.confirmedAt },
+    { candidateName: candidate.name, findings: data.findings, confirmedAt: data.confirmedAt, seal: data.seal },
     ...state.confirmations.filter((c) => c.candidateName !== candidate.name),
   ].slice(0, 20);
 }
@@ -2023,6 +2026,7 @@ async function approveItem(row, conf, btn) {
       itemId: row.itemId,
       findings: conf ? conf.findings : [],
       confirmedAt: conf ? conf.confirmedAt : null,
+      seal: conf ? conf.seal : null,
     });
   } catch (e) {
     res = {

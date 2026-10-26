@@ -417,6 +417,11 @@ export type ConfirmResponse = {
   findings: FlawFinding[];
   divergences: DivergenceView[];
   confirmedAt: string;
+  /**
+   * Main's HMAC over exactly these findings and this timestamp. Generation
+   * and approval refuse findings that do not come back with it unchanged.
+   */
+  seal: string;
   missingPastes: PasteKind[];
   /** Which pastes looked like an escaped view-source wrapper rather than source. */
   suspectPastes: PasteKind[];

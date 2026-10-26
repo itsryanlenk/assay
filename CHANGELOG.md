@@ -200,6 +200,11 @@ packet workflow, hardened and audited, but not yet tagged.
 
 ### Security
 
+- The renderer can no longer confirm anything itself. Generation and approval
+  read `operator-confirmed` and `confirmedAt` off findings the renderer sends,
+  so a compromised renderer could write both and ship a packet nobody had
+  pasted. Main now seals each confirmation it produces with a per-process key
+  and refuses findings that come back unsealed, edited, or re-dated.
 - Electron is on 43.8.3 and undici on 7.30.1, clearing every open advisory
   `npm audit` reports for both, including the 7.30.0 bump, which was still
   affected.

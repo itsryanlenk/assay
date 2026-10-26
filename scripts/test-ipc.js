@@ -25,6 +25,19 @@ app.setPath('sessionData', TEST_USER_DATA);
 
 const APP_ROOT = path.resolve(__dirname, '..');
 const { registerHandlers } = require(path.join(APP_ROOT, 'dist/main/main/ipc/handlers.js'));
+// This script IS the main process, so it can seal fixtures with the same key
+// the handlers check against. A renderer cannot.
+const SEAL = require(path.join(APP_ROOT, 'dist/main/main/confirmation/seal.js'));
+
+/**
+ * The findings, timestamp and seal for a payload, as renderer source.
+ * Evaluated here first so main seals exactly the values the renderer sends.
+ */
+function sealedArgs(findingsExpr, confirmedAt) {
+  const findings = Function(`return ${findingsExpr}`)();
+  return `findings: ${JSON.stringify(findings)}, confirmedAt: ${JSON.stringify(confirmedAt)}, ` +
+    `seal: ${JSON.stringify(SEAL.sealFor(findings, confirmedAt))}`;
+}
 
 const CONFIG_FILE = path.join(TEST_USER_DATA, 'config.json');
 
@@ -456,6 +469,12 @@ async function run(win) {
       unconfirmed.data.missingPastes.join(',') === 'homepage,robots',
     JSON.stringify(unconfirmed && unconfirmed.ok && unconfirmed.data.missingPastes)
   );
+  check(
+    'confirm:run seals exactly the findings and timestamp it returns',
+    unconfirmed && unconfirmed.ok === true && typeof unconfirmed.data.seal === 'string' &&
+      SEAL.sealHolds(unconfirmed.data.findings, unconfirmed.data.confirmedAt, unconfirmed.data.seal),
+    JSON.stringify(unconfirmed && unconfirmed.ok && unconfirmed.data.seal)
+  );
 
   // --- packet:generate ------------------------------------------------------
   // The last unwired step: generatePacket had no caller outside the tests, so
@@ -483,7 +502,7 @@ async function run(win) {
   const noIdentity = await inRenderer(
     win,
     `return await window.assay.packet.generate({ candidate: ${CAND},
-       findings: ${CONFIRMED_FINDING}, confirmedAt: new Date().toISOString() });`
+       ${sealedArgs(CONFIRMED_FINDING, new Date().toISOString())} });`
   );
   check(
     'packet:generate refuses until the operator has set their details',
@@ -681,9 +700,8 @@ async function run(win) {
   const unconfirmedGen = await inRenderer(
     win,
     `return await window.assay.packet.generate({ candidate: ${CAND},
-       findings: [{ checkId:'website', status:'flaw', severity:3, headline:'h', detail:'d',
-         evidence: [], confirmation: 'remote' }],
-       confirmedAt: new Date().toISOString() });`
+       ${sealedArgs(`[{ checkId:'website', status:'flaw', severity:3, headline:'h', detail:'d',
+         evidence: [], confirmation: 'remote' }]`, new Date().toISOString())} });`
   );
   check(
     'packet:generate refuses an unconfirmed finding',
@@ -699,10 +717,57 @@ async function run(win) {
     emptyFindings && emptyFindings.ok === false && emptyFindings.error.kind === 'bad_request',
     JSON.stringify(emptyFindings && emptyFindings.error));
 
-  const generated = await inRenderer(
+  /**
+   * THE RENDERER CANNOT CONFIRM ANYTHING ITSELF.
+   *
+   * `operator-confirmed` and `confirmedAt` used to be whatever the payload
+   * said, so a compromised renderer could write both and generate a packet
+   * with no paste ever made. Main now seals what confirm:run produced and
+   * refuses anything it did not seal, or anything changed since.
+   */
+  const forgedGen = await inRenderer(
     win,
     `return await window.assay.packet.generate({ candidate: ${CAND},
        findings: ${CONFIRMED_FINDING}, confirmedAt: new Date().toISOString() });`
+  );
+  check('packet:generate refuses a confirmation main never sealed',
+    forgedGen && forgedGen.ok === false && /not confirmed in this app/i.test(forgedGen.error.message),
+    JSON.stringify(forgedGen && (forgedGen.error || forgedGen.data)));
+
+  const REMOTE_FINDING = CONFIRMED_FINDING.replace(`'operator-confirmed'`, `'remote'`);
+  const remoteSeal = SEAL.sealFor(Function(`return ${REMOTE_FINDING}`)(), new Date().toISOString());
+  const promoted = Function(`return ${REMOTE_FINDING}`)();
+  const promotedAt = new Date().toISOString();
+  const promotedSeal = SEAL.sealFor(promoted, promotedAt);
+  promoted[0].confirmation = 'operator-confirmed';
+  const tamperedGen = await inRenderer(
+    win,
+    `return await window.assay.packet.generate({ candidate: ${CAND},
+       findings: ${JSON.stringify(promoted)}, confirmedAt: ${JSON.stringify(promotedAt)},
+       seal: ${JSON.stringify(promotedSeal)} });`
+  );
+  check('SETUP: seals differ when the findings differ', remoteSeal !== SEAL.sealFor(
+    Function(`return ${CONFIRMED_FINDING}`)(), new Date().toISOString()), '');
+  check('packet:generate refuses a sealed finding promoted to confirmed afterwards',
+    tamperedGen && tamperedGen.ok === false && /not confirmed in this app/i.test(tamperedGen.error.message),
+    JSON.stringify(tamperedGen && (tamperedGen.error || tamperedGen.data)));
+
+  const realFindings = Function(`return ${CONFIRMED_FINDING}`)();
+  const oldAt = new Date(Date.now() - 73 * 3600 * 1000).toISOString();
+  const redated = await inRenderer(
+    win,
+    `return await window.assay.packet.generate({ candidate: ${CAND},
+       findings: ${JSON.stringify(realFindings)}, confirmedAt: new Date().toISOString(),
+       seal: ${JSON.stringify(SEAL.sealFor(realFindings, oldAt))} });`
+  );
+  check('packet:generate refuses a sealed confirmation with its timestamp moved forward',
+    redated && redated.ok === false && /not confirmed in this app/i.test(redated.error.message),
+    JSON.stringify(redated && (redated.error || redated.data)));
+
+  const generated = await inRenderer(
+    win,
+    `return await window.assay.packet.generate({ candidate: ${CAND},
+       ${sealedArgs(CONFIRMED_FINDING, new Date().toISOString())} });`
   );
   check(
     'packet:generate writes a packet from a confirmed finding',
@@ -829,7 +894,7 @@ async function run(win) {
   const again = await inRenderer(
     win,
     `return await window.assay.packet.generate({ candidate: ${CAND},
-       findings: ${CONFIRMED_FINDING}, confirmedAt: new Date().toISOString() });`
+       ${sealedArgs(CONFIRMED_FINDING, new Date().toISOString())} });`
   );
   const pdf2 = again && again.ok
     ? fs.readFileSync(again.data.artifacts.find((a) => a.filename.endsWith('.pdf')).absolutePath)
@@ -909,9 +974,8 @@ async function run(win) {
   const remoteApprove = await inRenderer(
     win,
     `return await window.assay.approval.approve({ itemId: ${JSON.stringify(ITEM_ID)},
-       findings: [{ checkId: 'website', status: 'flaw', severity: 3, headline: 'h', detail: 'd',
-         evidence: [], confirmation: 'remote' }],
-       confirmedAt: new Date().toISOString() });`
+       ${sealedArgs(`[{ checkId: 'website', status: 'flaw', severity: 3, headline: 'h', detail: 'd',
+         evidence: [], confirmation: 'remote' }]`, new Date().toISOString())} });`
   );
   check(
     'approval:approve refuses an unconfirmed finding',
@@ -923,7 +987,7 @@ async function run(win) {
   const staleApprove = await inRenderer(
     win,
     `return await window.assay.approval.approve({ itemId: ${JSON.stringify(ITEM_ID)},
-       findings: ${CONFIRMED}, confirmedAt: ${JSON.stringify(stale)} });`
+       ${sealedArgs(CONFIRMED, stale)} });`
   );
   check(
     'approval:approve refuses a confirmation older than 72 hours',
@@ -938,10 +1002,22 @@ async function run(win) {
   check('approval:approve refuses a missing itemId',
     noId && noId.ok === false && noId.error.kind === 'bad_request', JSON.stringify(noId));
 
-  const approved = await inRenderer(
+  // The same wall at approval, on an item that is still prepared, so the
+  // refusal cannot be coming from its state.
+  const forgedApprove = await inRenderer(
     win,
     `return await window.assay.approval.approve({ itemId: ${JSON.stringify(ITEM_ID)},
        findings: ${CONFIRMED}, confirmedAt: new Date().toISOString() });`
+  );
+  check('approval:approve refuses a confirmation main never sealed',
+    forgedApprove && forgedApprove.ok === false &&
+      /not confirmed in this app/i.test(forgedApprove.error.message),
+    JSON.stringify(forgedApprove && (forgedApprove.error || forgedApprove.data)));
+
+  const approved = await inRenderer(
+    win,
+    `return await window.assay.approval.approve({ itemId: ${JSON.stringify(ITEM_ID)},
+       ${sealedArgs(CONFIRMED, new Date().toISOString())} });`
   );
   check(
     'approval:approve approves a confirmed, prepared item',
@@ -1121,7 +1197,7 @@ async function run(win) {
   const blockedApprove = await inRenderer(
     win,
     `return await window.assay.approval.approve({ itemId: ${JSON.stringify(ITEM_ID)},
-       findings: ${CONFIRMED}, confirmedAt: new Date().toISOString() });`
+       ${sealedArgs(CONFIRMED, new Date().toISOString())} });`
   );
   check('approving a rejected item is refused, and names reopening',
     blockedApprove && blockedApprove.ok === false && /reopen/i.test(blockedApprove.error.message),
@@ -1147,7 +1223,7 @@ async function run(win) {
   const nowApproved = await inRenderer(
     win,
     `return await window.assay.approval.approve({ itemId: ${JSON.stringify(ITEM_ID)},
-       findings: ${CONFIRMED}, confirmedAt: new Date().toISOString() });`
+       ${sealedArgs(CONFIRMED, new Date().toISOString())} });`
   );
   check('and it can then be approved through the bridge',
     nowApproved && nowApproved.ok === true, JSON.stringify(nowApproved && nowApproved.error));
@@ -1272,6 +1348,53 @@ async function foreignPageIsRefused() {
   }
 }
 
+/**
+ * The path the app actually takes, end to end over the real bridge: paste
+ * source into confirm:run, then hand its response, untouched, to
+ * packet:generate. Everything above seals fixtures from main; this proves the
+ * seal survives the round trip through the renderer the way app.js uses it.
+ * The agent mode is one that fails fast offline, so no model is called.
+ */
+async function confirmThenGenerate(win) {
+  const PAGE = `<html><head><title>Seal Shop Home Page</title>
+<meta name="description" content="Seal Shop sells handmade goods in Anytown and has done for years.">
+</head><body><a href="/blogs/news">Blog</a><p>${'Handmade goods. '.repeat(30)}</p></body></html>`;
+  const ROBOTS = 'User-agent: *\nAllow: /\n';
+  await inRenderer(win, `return await window.assay.config.setAgentMode('sdk-apikey');`);
+  const res = await inRenderer(
+    win,
+    `const cand = { placeId:'seal', name: 'Seal Shop', address: '1 Main St, Anytown, PA 00000, USA',
+       location: null, website: 'https://seal-shop.test', phone: null, rating: null,
+       reviewCount: null, businessStatus: 'OPERATIONAL', primaryType: null, mapsUri: null,
+       discoveredAt: new Date().toISOString(), source: 'google-places-new' };
+     const conf = await window.assay.confirm.run({ candidate: cand, scanId: 'seal-e2e',
+       crawlerFindings: [{ checkId: 'freshness', status: 'flaw', severity: 3, candidateName: 'Seal Shop',
+         headline: 'h', detail: 'd', evidence: [], confirmation: 'remote' }],
+       pastes: [
+         { kind: 'homepage', url: 'https://seal-shop.test', content: ${JSON.stringify(PAGE)} },
+         { kind: 'robots', url: 'https://seal-shop.test/robots.txt', content: ${JSON.stringify(ROBOTS)} },
+       ] });
+     if (!conf.ok) return { conf };
+     const gen = await window.assay.packet.generate({ candidate: cand,
+       findings: conf.data.findings, confirmedAt: conf.data.confirmedAt, seal: conf.data.seal });
+     if (!gen.ok) return { conf, gen };
+     const item = gen.data.queue.find((q) => q.slug === gen.data.slug && q.state === 'prepared');
+     const appr = await window.assay.approval.approve({ itemId: item.itemId,
+       findings: conf.data.findings, confirmedAt: conf.data.confirmedAt, seal: conf.data.seal });
+     return { conf, gen, appr };`
+  );
+  const conf = res && res.conf;
+  check('SETUP: a pasted page confirms the finding through the bridge',
+    conf && conf.ok === true && conf.data.findings.some((f) => f.confirmation === 'operator-confirmed'),
+    JSON.stringify(conf && (conf.error || conf.data.findings.map((f) => `${f.checkId}:${f.confirmation}`))));
+  check('a real confirmation, handed back unchanged, generates a packet',
+    res && res.gen && res.gen.ok === true && res.gen.data.artifacts.length >= 3,
+    JSON.stringify(res && res.gen && (res.gen.error || res.gen.data.artifacts.length)));
+  check('and the same confirmation approves one of its artifacts',
+    res && res.appr && res.appr.ok === true && res.appr.data.item.slug === res.gen.data.slug,
+    JSON.stringify(res && res.appr && (res.appr.error || res.appr.data.item)));
+}
+
 app.whenReady().then(async () => {
   registerHandlers();
 
@@ -1291,6 +1414,7 @@ app.whenReady().then(async () => {
   try {
     await run(win);
     await foreignPageIsRefused();
+    await confirmThenGenerate(win);
   } catch (e) {
     fatal = e;
   }
