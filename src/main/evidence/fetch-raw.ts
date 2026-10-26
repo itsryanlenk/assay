@@ -186,18 +186,23 @@ function isPrivateIPv6(ip: string): boolean {
     return s === '::1' || s === '::';
   }
   const [g0 = 0, g1 = 0, g2 = 0, g3 = 0, g4 = 0, g5 = 0, g6 = 0, g7 = 0] = g;
-  if ((g0 & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
-  if ((g0 & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
   const asV4 = (hi: number, lo: number) =>
     `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
-  // Any address that embeds an IPv4 in its low 32 bits and re-checks it there:
-  // ::/96 (loopback ::1, unspecified ::, and the deprecated IPv4-compatible
-  // range), ::ffff:0:0/96 (IPv4-mapped, dotted or hex), and 64:ff9b::/96
-  // (NAT64 well-known). A private v4 reached through any of these is refused.
-  const lowEmbedsV4 =
-    (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && (g5 === 0 || g5 === 0xffff)) ||
-    (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0);
-  if (lowEmbedsV4 && isPrivateIPv4(asV4(g6, g7))) return true;
+  // Two embeddings outside global unicast are still reachable, and the IPv4 in
+  // their low 32 bits decides: ::ffff:0:0/96 (IPv4-mapped, dotted or hex), and
+  // 64:ff9b::/96 (NAT64 well-known), which DNS64 networks hand back for every
+  // v4-only site.
+  const mapped = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff;
+  const nat64 = g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0;
+  if (mapped || nat64) return isPrivateIPv4(asV4(g6, g7));
+  // Everything else outside 2000::/3 is refused: loopback, unspecified, the
+  // IPv4-compatible and IPv4-translated (::ffff:0:a.b.c.d) forms, local-use
+  // NAT64, unique local, link-local, multicast. This used to be a list of
+  // embeddings to re-check, and a list misses the next one; an allowlist of
+  // the one block the public internet lives in does not.
+  if ((g0 & 0xe000) !== 0x2000) return true;
+  if (g0 === 0x2001 && g1 === 0) return true; // 2001::/32 Teredo
+  if (g0 === 0x2001 && g1 === 0x0db8) return true; // 2001:db8::/32 documentation
   // 6to4 2002::/16 carries the v4 in the two groups after the prefix.
   if (g0 === 0x2002 && isPrivateIPv4(asV4(g1, g2))) return true;
   return false;
@@ -586,6 +591,9 @@ export async function fetchRaw(rawUrl: string, opts: FetchRawOptions): Promise<R
         // domain is a finding, and the chain is the proof.
         const next = new URL(location, current);
         redirectChain.push(`${res.status} ${current.toString()} -> ${next.toString()}`);
+        // Nobody reads a redirect's body. Left alone it holds its socket until
+        // GC, and a chain of ten hops is ten of them.
+        await res.body?.cancel().catch(() => {});
         current = next;
         continue;
       }

@@ -200,6 +200,25 @@ packet workflow, hardened and audited, but not yet tagged.
 
 ### Security
 
+- Electron is on 43.8.3 and undici on 7.30.1, clearing every open advisory
+  `npm audit` reports for both, including the 7.30.0 bump, which was still
+  affected.
+- A packet copies a capture into `01-evidence` only from inside the evidence
+  folder, and only while its bytes still hash to what the finding cites. The
+  path arrives from the renderer, and the folder goes to the prospect, so a
+  bad payload could otherwise have put `config.json` or any readable file in it.
+- IPv6 egress is an allowlist: only global unicast is fetched, so
+  `::ffff:0:a.b.c.d`, local-use NAT64, multicast, Teredo and documentation
+  addresses are refused along with every embedding nobody has listed yet.
+  IPv4-mapped and well-known NAT64 addresses still defer to the IPv4 inside.
+- Main answers IPC only from the app's own page in its top frame, and refuses
+  every permission request a page could make.
+- The Schema Starter Kit escapes the business name in its prose, the town in
+  its title and meta snippets, and `<`, `>` and `&` in the JSON-LD the reader
+  pastes inside a `<script>` tag. A sitemap URL that could break out of its
+  code span is left out. 00-INDEX escapes headlines and score notes.
+- Redirect bodies are cancelled hop by hop instead of holding a socket each,
+  and the PDF print window refuses navigation.
 - SSRF guard on `fetch-raw.ts` refusing Google Maps/Search hosts and private,
   loopback, link-local, and reserved addresses on every redirect hop. Maps is
   matched on a label boundary with the trailing dot normalised, so neither

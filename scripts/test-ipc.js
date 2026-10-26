@@ -1242,6 +1242,36 @@ async function run(win) {
     mapUi && mapUi.csp);
 }
 
+/**
+ * Main answers only the app's own page. Any other page carrying the same
+ * preload, a second window or a navigated one, gets a refusal rather than the
+ * approval and packet channels. The control call proves the bridge is
+ * present on that page, so the refusal is main's doing and not a missing API.
+ */
+async function foreignPageIsRefused() {
+  const other = path.join(TEST_USER_DATA, 'not-the-app.html');
+  fs.writeFileSync(other, '<!doctype html><title>other</title>');
+  const w = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      preload: path.join(APP_ROOT, 'dist/main/main/preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  try {
+    await w.loadFile(other);
+    const res = await inRenderer(w, `return await window.assay.app.info();`);
+    check('SETUP: the foreign page has the bridge', res !== undefined && res !== null, JSON.stringify(res));
+    check('a page that is not the app is refused by main',
+      res && res.ok === false && /did not come from the app window/.test((res.error && res.error.message) || ''),
+      JSON.stringify(res));
+  } finally {
+    w.destroy();
+  }
+}
+
 app.whenReady().then(async () => {
   registerHandlers();
 
@@ -1260,6 +1290,7 @@ app.whenReady().then(async () => {
   let fatal = null;
   try {
     await run(win);
+    await foreignPageIsRefused();
   } catch (e) {
     fatal = e;
   }

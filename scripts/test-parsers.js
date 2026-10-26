@@ -814,8 +814,21 @@ eq('every flaw verdict carries a fix', M.__test.verdicts({ ...CLEAN, robotsDisal
   eq('NAT64 embedding of loopback is private', priv('[64:ff9b::7f00:1]'), true);
   eq('6to4 embedding of loopback is private', priv('[2002:7f00:1::]'), true);
   eq('IPv4-compatible embedding of loopback is private', priv('[::7f00:1]'), true);
+  // Forms a denylist of embedded ranges missed. Only global unicast
+  // (2000::/3) is reachable now, so every one of these, and every future
+  // embedding outside that block, is refused by the same rule.
+  eq('IPv4-translated v6 (::ffff:0:0/96) of loopback is private', priv('[::ffff:0:7f00:1]'), true);
+  eq('local-use NAT64 (64:ff9b:1::/48) is private', priv('[64:ff9b:1::7f00:1]'), true);
+  // DNS64 networks synthesize these for every v4-only site, so the embedded
+  // v4 decides, as it did before.
+  eq('NAT64 well-known of a public v4 is still allowed', priv('[64:ff9b::5db8:d822]'), false);
+  eq('multicast v6 is private', priv('[ff02::1]'), true);
+  eq('Teredo is private', priv('[2001:0:4136:e378:8000:63bf:3fff:fdd2]'), true);
+  eq('documentation v6 is private', priv('[2001:db8::1]'), true);
+  eq('IPv4-mapped public v4 is still allowed', priv('[::ffff:5db8:d822]'), false);
   // A genuinely public v6 is still allowed.
   eq('a public v6 is not private', priv('[2606:4700:4700::1111]'), false);
+  eq('a public v6 in the 2a00 block is not private', priv('[2a00:1450:4001::200e]'), false);
 
   // Law 5: Google Maps and Search are refused on any Google TLD.
   eq('maps.google.com is refused', F.__ssrf.refusedReason('https://maps.google.com/') !== null, true);

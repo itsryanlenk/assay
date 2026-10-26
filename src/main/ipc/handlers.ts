@@ -67,6 +67,7 @@ import { confirm, looksLikeEscapedViewSource, releasable } from '../confirmation
 import { addToBlocklist, blockedBy, loadBlocklist, pacingWarning, type PacketStart } from '../confirmation/policy';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 /**
  * Packet starts, for the pacing rule. A tiny append-only log rather than a
@@ -108,6 +109,36 @@ function recordPacketStart(root: string, candidateName: string): void {
 
 type PayloadHandler = (payload: unknown) => Promise<unknown> | unknown;
 
+/** dist/main/main/ipc -> the app root, the same root main.ts loads from. */
+const RENDERER_URL = pathToFileURL(
+  path.resolve(__dirname, '..', '..', '..', '..', 'src', 'renderer', 'index.html')
+).href;
+
+/**
+ * Only the app's own page, in its top frame, may call into main.
+ *
+ * Today there is one window and it cannot navigate or open another, so
+ * nothing else can reach these channels. This keeps it that way when that
+ * changes: an iframe, a second window or a navigated page does not inherit
+ * the approval, packet and config channels by default.
+ */
+function trustedSender(event: IpcMainInvokeEvent): boolean {
+  const frame = event.senderFrame;
+  if (!frame || frame !== event.sender.mainFrame) return false;
+  let url: URL;
+  try {
+    url = new URL(frame.url);
+  } catch {
+    return false;
+  }
+  url.hash = '';
+  url.search = '';
+  // Windows file URLs can differ in drive-letter case between Node and Chromium.
+  return process.platform === 'win32'
+    ? url.href.toLowerCase() === RENDERER_URL.toLowerCase()
+    : url.href === RENDERER_URL;
+}
+
 /**
  * Wraps a handler so that (a) any thrown error becomes a typed Err instead of
  * an opaque IPC fault, and (b) the handler receives the PAYLOAD, not Electron's
@@ -120,11 +151,17 @@ type PayloadHandler = (payload: unknown) => Promise<unknown> | unknown;
  * kept working, so the app looked healthy while all five payload-carrying
  * channels silently rejected everything as malformed.
  *
- * The event is dropped on purpose: no handler here needs the sender, and
- * dropping it makes the mistake unrepeatable. scripts/test-ipc.js is the guard.
+ * The event is dropped before the handler sees it: no handler here needs the
+ * sender, and dropping it makes the mistake unrepeatable. scripts/test-ipc.js
+ * is the guard. The wrapper itself reads the event once, to refuse any caller
+ * that is not the app's own top-level page; see `trustedSender`.
  */
 function safe(channel: string, fn: PayloadHandler) {
-  return async (_event: IpcMainInvokeEvent, payload: unknown) => {
+  return async (event: IpcMainInvokeEvent, payload: unknown) => {
+    if (!trustedSender(event)) {
+      console.error(`[ipc:${channel}] refused a call from ${event.senderFrame?.url ?? 'a detached frame'}`);
+      return err('bad_request', 'This request did not come from the app window.');
+    }
     try {
       return await fn(payload);
     } catch (e) {
@@ -553,6 +590,7 @@ export function registerHandlers(): void {
             findings: p.findings as FlawFinding[],
             confirmedAt: typeof p.confirmedAt === 'string' ? p.confirmedAt : null,
             outputRoot: config.packetsDir(),
+            evidenceRoot: config.evidenceDir(),
             contactName: typeof p.contactName === 'string' ? p.contactName : null,
             operator,
             brand,

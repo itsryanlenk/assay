@@ -20,6 +20,7 @@
  * where the work does instead of in somebody's memory.
  */
 
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Candidate, FlawFinding, Score } from '../../shared/types';
@@ -64,6 +65,11 @@ export type GenerateRequest = {
   operator: { name: string; email: string; scannerUrl: string; askMode?: 'default' | 'custom'; ask?: string };
   /** Derived in main from config; null when nothing is branded. */
   brand?: BrandContext | null;
+  /**
+   * The app's evidence folder, from config. A capture is copied into the
+   * packet only from inside it; see `keptCapture`.
+   */
+  evidenceRoot: string;
 };
 
 export type GenerateResult = {
@@ -271,7 +277,7 @@ export async function generatePacket(
   // WALL 2 again, for the one document that used to be written after it. The
   // manifest reaches the prospect inside the client folder, so it passes the
   // same sweep before a byte of the packet is written.
-  const manifest = renderCaptureManifest(req.findings);
+  const manifest = renderCaptureManifest(req.findings, req.evidenceRoot);
   assertClean('01-evidence/00-CAPTURES', manifest.sweepText, allowed);
 
   fs.mkdirSync(paths.drafts, { recursive: true });
@@ -376,6 +382,42 @@ function inertCell(s: string): string {
   return '`' + s.replace(/`/g, "'").replace(/\|/g, '%7C') + '`';
 }
 
+/**
+ * Whether a cited capture may be copied into the client folder.
+ *
+ * `storedPath` reaches generation inside the findings the renderer sends, so
+ * on its own it is a path anybody holding the IPC channel can choose. Copying
+ * it on `existsSync` alone would put config.json (the Places key) or any other
+ * file the operator can read into 01-evidence, which is the folder that goes
+ * to the prospect. So the path has to resolve, symlinks included, to a file
+ * inside the evidence root, and its bytes have to still hash to the sha256
+ * the finding cites. Anything else is listed as not kept.
+ */
+function keptCapture(storedPath: string, sha256: string, evidenceRoot: string): boolean {
+  if (!storedPath || !evidenceRoot) return false;
+  try {
+    const root = fs.realpathSync(evidenceRoot);
+    const real = fs.realpathSync(storedPath);
+    const rel = path.relative(root, real);
+    if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    if (!fs.statSync(real).isFile()) return false;
+    const actual = createHash('sha256').update(fs.readFileSync(real)).digest('hex');
+    return actual === sha256.toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Third-party text made inert in Markdown prose, by backslash-escaping every
+ * character that could start a link, an image, emphasis, code, a heading, a
+ * table cell or raw HTML. Escaping instead of stripping keeps the text
+ * readable: "Bob's (Best) Diner" still reads as itself.
+ */
+export function mdEscape(s: string): string {
+  return s.replace(/\s+/g, ' ').replace(/[\\`*_{}[\]()#+!|<>~]/g, '\\$&');
+}
+
 /** Hex, or it does not get to name a file. */
 function safeHashPrefix(sha256: string): string | null {
   return /^[0-9a-f]{16,}$/i.test(sha256) ? sha256.slice(0, MANIFEST_HASH_CHARS) : null;
@@ -398,7 +440,7 @@ type CaptureFile = { from: string; name: string };
  * copies are what make a client folder portable: checkable by somebody who has
  * neither this app nor its cache.
  */
-export function renderCaptureManifest(findings: FlawFinding[]): {
+export function renderCaptureManifest(findings: FlawFinding[], evidenceRoot: string): {
   text: string;
   /**
    * The rows only, for the sweep.
@@ -431,7 +473,7 @@ export function renderCaptureManifest(findings: FlawFinding[]): {
       const ext = /html/i.test(e.contentType ?? '') ? 'html' : 'txt';
       const name = short ? `${short}__${src}.${ext}` : null;
 
-      const kept = Boolean(name && e.storedPath && fs.existsSync(e.storedPath));
+      const kept = Boolean(name && keptCapture(e.storedPath, e.sha256, evidenceRoot));
       if (kept && name) files.push({ from: e.storedPath, name });
 
       rows.push(
@@ -473,7 +515,8 @@ export function renderCaptureManifest(findings: FlawFinding[]): {
     'ran, so on a script-rendered site both sets show the server HTML and',
     'agreement between them says nothing about what a reader sees.',
     '',
-    '`_not kept_` means the fetch succeeded and writing it to disk did not. The',
+    '`_not kept_` means the bytes could not be copied here: writing them to disk',
+    'failed at fetch time, or the stored file no longer matches its hash. The',
     'finding still stands on the hash and the byte count recorded at fetch time;',
     'the bytes themselves are simply not here to re-read.',
     '',
@@ -535,7 +578,9 @@ function renderIndex(
     lines.push('| Check | Weight | Earned | Note |');
     lines.push('|---|---|---|---|');
     for (const i of score.items) {
-      lines.push(`| ${i.label} | ${i.possible} | ${i.na ? 'N/A' : i.earned} | ${i.note} |`);
+      // Notes can quote paths off the scanned site, which may carry `|`, `[`
+      // or `(`: enough to forge a column or a link in this table.
+      lines.push(`| ${i.label} | ${i.possible} | ${i.na ? 'N/A' : i.earned} | ${mdEscape(i.note)} |`);
     }
     lines.push('');
   }
@@ -543,8 +588,8 @@ function renderIndex(
   lines.push('## Findings');
   lines.push('');
   for (const f of req.findings) {
-    lines.push(`- **${f.checkId}** (${f.status}, severity ${f.severity}, ${f.confirmation}): ${f.headline}`);
-    if (f.fix) lines.push(`  - Fix (${f.fix.effort}): ${f.fix.summary}`);
+    lines.push(`- **${f.checkId}** (${f.status}, severity ${f.severity}, ${f.confirmation}): ${mdEscape(f.headline)}`);
+    if (f.fix) lines.push(`  - Fix (${f.fix.effort}): ${mdEscape(f.fix.summary)}`);
     for (const e of f.evidence) {
       lines.push(`  - Evidence: ${e.source} · HTTP ${e.httpStatus} · ${e.byteLength} bytes · sha256 ${e.sha256.slice(0, 12)}`);
     }

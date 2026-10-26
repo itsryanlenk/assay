@@ -6,7 +6,7 @@
  * Everything the renderer can do is the explicit channel list in shared/channels.ts.
  */
 
-import { app, BrowserWindow, Menu, dialog, shell } from 'electron';
+import { app, BrowserWindow, Menu, dialog, session, shell } from 'electron';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { buildAppMenu } from './menu';
@@ -315,6 +315,12 @@ if (!app.requestSingleInstanceLock()) {
       app.exit(1);
       return;
     }
+
+    // Electron grants permission requests by default. Nothing in the renderer
+    // needs camera, location, notifications, HID or anything else, so every
+    // request and every check is refused.
+    session.defaultSession.setPermissionRequestHandler((_wc, _perm, callback) => callback(false));
+    session.defaultSession.setPermissionCheckHandler(() => false);
 
     fs.mkdirSync(evidenceDir(), { recursive: true });
     // Under --smoke the proxy serves a stub tile and never touches the
