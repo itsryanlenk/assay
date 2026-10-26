@@ -112,7 +112,7 @@ const api = {
    */
   approval: {
     queue: () => ipcRenderer.invoke(CH.approvalQueue),
-    approve: (req: { itemId: string; findings: unknown[]; confirmedAt: string | null }) =>
+    approve: (req: { itemId: string; findings: unknown[]; confirmedAt: string | null; seal: string | null }) =>
       ipcRenderer.invoke(CH.approvalApprove, req),
     reject: (req: { itemId: string; reason: string }) =>
       ipcRenderer.invoke(CH.approvalReject, req),

@@ -73,7 +73,10 @@ The project is pre-1.0 and ships from `main`. Only the latest commit on
 - The five laws. The design promises in the README are enforced in code
   (evidence provenance, no fabrication, per-item approval, score transparency,
   discovery surface). A way to make an artifact ship a claim the operator never
-  confirmed, or to bypass `assertMinted`, is in scope.
+  confirmed, or to bypass `assertMinted`, is in scope. Confirmations are sealed
+  in main (`src/main/confirmation/seal.ts`), so a renderer that writes
+  `operator-confirmed` on its own findings is refused at generation and at
+  approval; a way around that seal is in scope.
 - Secret handling. `data/config.json` holds the operator's Places key. A way
   to leak it into a packet, a log line, an error message, or a fetched-site
   request is in scope.

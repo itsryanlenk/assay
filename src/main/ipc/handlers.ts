@@ -64,6 +64,7 @@ import { providerFor } from '../agent/resolve';
 import { withBrandVoice } from '../agent/brand-voice';
 import { runChecks } from '../checks/registry';
 import { confirm, looksLikeEscapedViewSource, releasable } from '../confirmation/gate';
+import { sealFor, sealHolds, UNSEALED_REASON } from '../confirmation/seal';
 import { addToBlocklist, blockedBy, loadBlocklist, pacingWarning, type PacketStart } from '../confirmation/policy';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -458,6 +459,7 @@ export function registerHandlers(): void {
         findings: result.findings,
         divergences: result.divergences,
         confirmedAt: result.confirmedAt,
+        seal: sealFor(result.findings, result.confirmedAt),
         missingPastes: result.missingPastes,
         suspectPastes,
         release: releasable(result.findings, result.confirmedAt),
@@ -553,6 +555,7 @@ export function registerHandlers(): void {
         candidate?: unknown;
         findings?: unknown;
         confirmedAt?: unknown;
+        seal?: unknown;
         contactName?: unknown;
       };
       const candidate = p.candidate as Candidate | undefined;
@@ -561,6 +564,11 @@ export function registerHandlers(): void {
       }
       if (!Array.isArray(p.findings) || p.findings.length === 0) {
         return err('bad_request', 'There are no findings to generate from.');
+      }
+      // releasable() reads the confirmation off these findings, so they have
+      // to be the ones confirm:run produced. See confirmation/seal.ts.
+      if (!sealHolds(p.findings, p.confirmedAt ?? null, p.seal)) {
+        return err('bad_request', UNSEALED_REASON);
       }
 
       // An artifact reaching a prospect has to say who it is from. A footer
@@ -635,8 +643,9 @@ export function registerHandlers(): void {
   /**
    * Approve one artifact.
    *
-   * The findings and confirmation timestamp come from the renderer, and the
-   * gate does not take them on trust: `approve` re-runs the same
+   * The findings and confirmation timestamp come from the renderer, so they
+   * must carry the seal confirm:run put on them (confirmation/seal.ts), and
+   * then the gate re-checks what they say: `approve` re-runs the same
    * `releasable()` that generation ran, so an expired confirmation or an
    * unconfirmed finding is refused here even though it passed at generation
    * time. That is the point of checking twice; a packet generated on Tuesday
@@ -652,12 +661,16 @@ export function registerHandlers(): void {
         itemId?: unknown;
         findings?: unknown;
         confirmedAt?: unknown;
+        seal?: unknown;
       };
       if (typeof p.itemId !== 'string' || p.itemId.trim() === '') {
         return err('bad_request', 'An itemId is required.');
       }
       if (!Array.isArray(p.findings)) {
         return err('bad_request', 'The confirmed findings are required; approval re-checks them.');
+      }
+      if (!sealHolds(p.findings, p.confirmedAt ?? null, p.seal)) {
+        return err('bad_request', UNSEALED_REASON);
       }
       const confirmedAt = typeof p.confirmedAt === 'string' ? p.confirmedAt : null;
 
